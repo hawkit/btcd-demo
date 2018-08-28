@@ -12,10 +12,7 @@ import (
 	"net"
 	"btcd-demo/chaincfg"
 
-	"github.com/btcsuite/btcutil"
-
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/database"
+	"github.com/hawkit/btcutil-demo"
 )
 
 const (
@@ -39,9 +36,9 @@ const (
 	defaultBlockMinWeight = 0
 	defaultBlockMaxWeight = 3000000
 	blockMaxSizeMin = 1000
-	blockMaxSizeMax = blockchain.MaxBlockBaseSize - 1000
+	blockMaxSizeMax = 1000 //todo blockchain.MaxBlockBaseSize - 1000
 	blockMaxWeightMin = 4000
-	blockMaxWeightMax = blockchain.MaxBlockWeight - 4000
+	blockMaxWeightMax = 4000 //todo blockchain.MaxBlockWeight - 4000
 	defaultGenerate = false
 	defaultMaxOrphanTransactions = 100
 	defaultMaxOrphanTxSize = 100000
@@ -52,13 +49,13 @@ const (
 )
 
 var (
+
 	defaultHomeDir = btcutil.AppDataDir("btcd", false)
 	defaultConfigFile = filepath.Join(defaultHomeDir, sampleConfigFilename)
 	defaultDataDir = filepath.Join(defaultHomeDir, dafaultDataDirname)
 	defaultLogDir = filepath.Join(defaultHomeDir, defaultLogFilename)
 	defaultRPCKeyFile = filepath.Join(defaultHomeDir, "rpc.key")
 	defaultRPCCertFile = filepath.Join(defaultHomeDir, "rpc.cert")
-	knownBbTypes = database.SupportedDrivers()
 )
 // config defines the configuration options for btcd
 // see loadConfig for details on the configuration load process.

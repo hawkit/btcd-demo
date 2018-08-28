@@ -3,11 +3,11 @@ package main
 import (
 	"runtime/debug"
 	"runtime"
-	"github.com/btcsuite/btcd/limits"
 	"fmt"
 	"os"
 	"net"
 	"btcd-demo/database"
+	"btcd-demo/limits"
 )
 
 var (
