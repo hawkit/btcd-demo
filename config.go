@@ -13,6 +13,9 @@ import (
 	"btcd-demo/chaincfg"
 
 	"github.com/hawkit/btcutil-demo"
+	flags "github.com/jessevdk/go-flags"
+	"runtime"
+	"fmt"
 )
 
 const (
@@ -148,10 +151,15 @@ type serviceOptions struct {
 	ServiceCommand string `short:"s" long:"service" description:"Service command {install, remove, start, stop}"`
 }
 
+
 // newConfigParser returns a new command line flags parser
-//func newConfigParser(cfg *config, so *serviceOptions, options flags.Options) *flags.Parser {
-//
-//}
+func newConfigParser(cfg *config, so *serviceOptions, options flags.Options) *flags.Parser {
+	parser := flags.NewParser(cfg, options)
+	if runtime.GOOS == "windows" {
+		parser.AddGroup("Service Options", "Service Options", so)
+	}
+	return parser
+}
 
 // loadConfig 通过配置文件，命令行选项来初始化配置
 //
@@ -195,15 +203,22 @@ func loadConfig()(*config, []string, error)  {
 	}
 
 	// Service options which are only added on windows
-	//serviceOpts := serviceOptions{}
+	serviceOpts := serviceOptions{}
 
 	// Pre-parse the command line options to see if an alternative config
 	// file or the version flag aws specified. Any errors aside from the
 	// help message error can be ignored here since they will be caught by
 	// final parse below
-	//preCfg := cfg
-	//preParser := newConfigParser(&preCfg, &serviceOpts, flags.HelpFlag)
-
+	preCfg := cfg
+	preParser := newConfigParser(&preCfg, &serviceOpts, flags.HelpFlag)
+	_, err := preParser.Parse()
+	if err != nil {
+		if e, ok := err.(*flags.Error); ok && e.Type == flags.ErrHelp {
+			fmt.Fprintln(os.Stderr, err)
+			return nil, nil, err
+		}
+	}
+	
 	return &cfg, nil, nil
 }
 
