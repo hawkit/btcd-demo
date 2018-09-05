@@ -3,11 +3,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:a28145666510ad8f4eba207f7b5a82c6941b42390f1d981ba23e2a0ba6c9c95c"
+  digest = "1:e6508efdc17a7cdef39c5fb8a22444d2b05decaa4b2bdc1f9b904705f3cae73d"
   name = "github.com/hawkit/btcutil-demo"
   packages = ["."]
   pruneopts = "UT"
-  revision = "19272c081f6783c22bc7c0bd6885bb225a13fde4"
+  revision = "ed4526f6cd3d131d909ab44538de0cea990c32d7"
 
 [[projects]]
   digest = "1:a2cff208d4759f6ba1b1cd228587b0a1869f95f22542ec9cd17fff64430113c7"
@@ -24,6 +24,14 @@
   pruneopts = "UT"
   revision = "a93b200c26cbae3bb09dd0dc2c7c7fe1468a034a"
   version = "v1.0.0"
+
+[[projects]]
+  digest = "1:40e195917a951a8bf867cd05de2a46aaf1806c50cf92eebf4c16f78cd196f747"
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
 
 [solve-meta]
   analyzer-name = "dep"
