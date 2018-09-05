@@ -16,6 +16,9 @@ import (
 	flags "github.com/jessevdk/go-flags"
 	"runtime"
 	"fmt"
+	"sort"
+	"btcd-demo/database"
+	"btcd-demo/blockchain"
 )
 
 const (
@@ -59,7 +62,22 @@ var (
 	defaultLogDir = filepath.Join(defaultHomeDir, defaultLogFilename)
 	defaultRPCKeyFile = filepath.Join(defaultHomeDir, "rpc.key")
 	defaultRPCCertFile = filepath.Join(defaultHomeDir, "rpc.cert")
+	knownDbTypes       = database.SupportedDrivers()
 )
+
+// runServiceCommand is only set to a real function on Windows. It is used
+// to parse and execute service commands specified via the -s flag
+var runServiceCommand func(string) error
+
+// minUint32 is a helper function to return the minimum of two uint32s.
+// This avoids a math import and the need to case to flots
+func minUint32(a, b uint32) uint32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // config defines the configuration options for btcd
 // see loadConfig for details on the configuration load process.
 type config struct {
@@ -151,6 +169,108 @@ type serviceOptions struct {
 	ServiceCommand string `short:"s" long:"service" description:"Service command {install, remove, start, stop}"`
 }
 
+// cleanAndExpandPath expands environment variables and leading ~ in the
+// passed path, cleans the result, and returns it.
+func cleanAndExpandPath(path string) string {
+	// Expand initial ~ to OS specific home directory
+	if strings.HasPrefix(path, "~") {
+		homeDir := filepath.Dir(defaultHomeDir)
+		path = strings.Replace(path, "~", homeDir, 1)
+	}
+	return filepath.Clean(os.ExpandEnv(path))
+}
+
+// validateLogLevel returns whether or not logLevel is a valid debug log level.
+func validateLogLevel(logLevel string) bool {
+	switch logLevel {
+	case "trace":
+		fallthrough
+	case "debug":
+		fallthrough
+	case "info":
+		fallthrough
+	case "warn":
+		fallthrough
+	case "error":
+		fallthrough
+	case "critical":
+		return true
+	}
+	return false
+}
+
+// supportedSubsystems returns a sorted slice of the supported subsystems for
+// logging purpose
+func supportedSubsystems() []string {
+	// Convert the subsystemLoggers map keys to a slice
+	subsytems := make([]string, 0, len(subsystemLoggers))
+	for subSysId := range subsystemLoggers {
+		subsytems = append(subsytems, subSysId)
+	}
+
+	// Sort the subsystems for stable display
+	sort.Strings(subsytems)
+	return subsytems
+}
+
+// parseAndSetDebugLevels attempts to parse the specified debug level and set
+// the levels accordingly. An appropriate error is returned if anything is
+// invalid
+func parseAndSetDebugLevels(debugLevel string) error {
+	// When the specified string doesn't have any delimters, treat it as
+	// the log level for all subsystems.
+	if !strings.Contains(debugLevel, ",") && !strings.Contains(debugLevel, "=") {
+		// Validate debug log level.
+		if !validateLogLevel(debugLevel) {
+			str := "The specified debug level [%v] is invalid"
+			return fmt.Errorf(str, debugLevel)
+		}
+
+		// Change the logging level for all subsystem
+		setLogLevels(debugLevel)
+		return nil
+	}
+
+	// Split the specified string into subsystem/level pairs while detecting
+	// issues and update the log levels accordingly.
+	for _, logLevelPair := range strings.Split(debugLevel, ",") {
+		if !strings.Contains(logLevelPair, "=") {
+			str := "The specified debug level contains an invalid " +
+				"subsystem/level pari [%v]"
+			return fmt.Errorf(str, logLevelPair)
+		}
+
+		// Extract the specified subsystem and log level.
+		fields := strings.Split(logLevelPair, "=")
+		subsysID, logLevel := fields[0], fields[1]
+
+		// Validate subsystem
+		if _, exists := subsystemLoggers[subsysID]; !exists {
+			str := "The specified subsystem [%v] is invalid --" +
+				"supported subsystems %v"
+			return fmt.Errorf(str, subsysID, supportedSubsystems())
+		}
+
+		// Validate log level.
+		if !validateLogLevel(logLevel) {
+			str := "The specified debug level [%v] is invalid"
+			return fmt.Errorf(str, logLevel)
+		}
+		setLogLevel(subsysID, logLevel)
+	}
+	return nil
+}
+
+// validDbType returns whether or not dbType is a supported database type.
+func validDbType(dbType string) bool {
+	for _, knownType := range knownDbTypes {
+		if dbType == knownType {
+			return true
+		}
+	}
+
+	return false
+}
 
 // newConfigParser returns a new command line flags parser
 func newConfigParser(cfg *config, so *serviceOptions, options flags.Options) *flags.Parser {
@@ -218,7 +338,330 @@ func loadConfig()(*config, []string, error)  {
 			return nil, nil, err
 		}
 	}
+
+	// Show the version and exit if the version flag was specified
+	appName := filepath.Base(os.Args[0])
+	appName = strings.TrimSuffix(appName, filepath.Ext(appName))
+	usageMessage := fmt.Sprintf("Use %s -h to show usage", appName)
+	if preCfg.ShowVersion {
+		fmt.Println(appName, "version", version())
+		os.Exit(0)
+	}
+
+	// Perform service command and exit if specified. Invalid service
+	// commands show an appropriate error. Only runs on Windows since
+	// the runServiceCommand function will be nil when not on Windows.
+	if serviceOpts.ServiceCommand != "" && runServiceCommand != nil {
+		err := runServiceCommand(serviceOpts.ServiceCommand)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		os.Exit(0)
+	}
+
+	// Load additional config form file
+	var configFileError error
+	parser := newConfigParser(&cfg, &serviceOpts, flags.Default)
+	if !(preCfg.RegressionTest || preCfg.SimNet) || preCfg.ConfigFile != defaultConfigFile {
+		if _, err := os.Stat(preCfg.ConfigFile); os.IsNotExist(err) {
+			err := createDefaultConfigFile(preCfg.ConfigFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error creating a " + "default config file: %v \n", err)
+			}
+		}
+
+		err := flags.NewIniParser(parser).ParseFile(preCfg.ConfigFile)
+		if err != nil {
+			if _, ok := err.(*os.PathError); !ok {
+				fmt.Fprintf(os.Stderr, "Error parsing config " + "file: %v\n", err)
+				fmt.Fprintln(os.Stderr, usageMessage)
+				return nil, nil, err
+			}
+			configFileError = err
+		}
+
+	}
+
+	// Don't add peers from the config file when in regression test mode.
+	if preCfg.RegressionTest && len(cfg.AddPeers) > 0 {
+		cfg.AddPeers = nil
+	}
+
+	// Parse command line options agian to ensure they take precedence.
+	remainingArgs, err := parser.Parse()
+	if err != nil {
+		if e, ok := err.(*flags.Error); !ok || e.Type != flags.ErrHelp {
+			fmt.Fprintln(os.Stderr, usageMessage)
+		}
+		return nil, nil, err
+	}
+
+	// Create the home directory if it doesn't already exist
+	funcName := "loadConfig"
+	err = os.MkdirAll(defaultHomeDir, 0700)
+	if err != nil {
+		// Show a nicer error message if it's because a symlink is
+		// linked to a directory that does not exist (probably because
+		// it's not mounted)
+		if e, ok := err.(*os.PathError); ok && os.IsExist(err) {
+			if link, lerr := os.Readlink(e.Path); lerr == nil {
+				str := "is symlink %s -> %s mounted?"
+				err = fmt.Errorf(str, e.Path, link)
+			}
+		}
+
+		str := "%s: Failed to create home directory: %v"
+		err := fmt.Errorf(str, funcName, err)
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, err
+ 	}
+
+	// Multiple networks can't be selected simultaneously
+	numNets := 0
+	// Count number of network flags passed; assign active network params
+	// while we're at it
+	if cfg.TestNet3 {
+		numNets++
+		activeNetParams = &testNet3Params
+	}
+	if cfg.RegressionTest {
+		numNets++
+		activeNetParams = &regressionNetParams
+	}
+	if cfg.SimNet {
+		numNets++
+		activeNetParams = &simNetParams
+	}
+	if numNets > 1 {
+		str := "%s: The testnet, regtest, segnet, and simnet params " +
+			"can't be used together -- choose on of the four"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Set the default policy for relaying non-standard transactions
+	// according to the default of the action network. The set
+	// configuration value takes precedence over the default value for
+	// the selected network.
+	relayNotStd := activeNetParams.RelayNonStdTxs
+	switch  {
+	case cfg.RelayNonStd && cfg.RejectNonStd:
+		str := "%s: rejectnonstd and relaynonstd cannot be used " +
+			"together -- choose only one"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	case cfg.RejectNonStd:
+		relayNotStd = false
+	case cfg.RelayNonStd:
+		relayNotStd = true
+	}
+	cfg.RelayNonStd = relayNotStd
+
+	// Append the network type to the data directory so it is "namespaced"
+	// per network. In addition to the block database, there are other pieces
+	// of data that are saved to disk such as address manager state.
+	// All data is specific to a network, so namespacing the data directory
+	// means each individual peice of serialized data does not have to
+	// worry about changing names per network and such.
+	cfg.DataDir = cleanAndExpandPath(cfg.DataDir)
+	cfg.DataDir = filepath.Join(cfg.DataDir, netName(activeNetParams))
+
+	// Append the network type to the log directory so it is "namespaced"
+	// per network in the same fashion as the data directory
+	cfg.LogDir = cleanAndExpandPath(cfg.LogDir)
+	cfg.LogDir = filepath.Join(cfg.LogDir, netName(activeNetParams))
+
+	// Special show command to list supported subsystems and exit
+	if cfg.DebugLevel == "show" {
+		fmt.Println("Supported subsystems", supportedSubsystems())
+		os.Exit(0)
+	}
+
+	// Initialize log ratation. After log rotation has been initialized, the
+	// logger variables may be used.
+	initLogRotator(filepath.Join(cfg.LogDir, defaultLogFilename))
+
+	// Parse, validate, and set debug log level(s)
+	if err := parseAndSetDebugLevels(cfg.DebugLevel); err !=nil {
+		err := fmt.Errorf("%s: %v", funcName, err.Error())
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+	// Validate database type
+	if !validDbType(cfg.DbType) {
+
+	}
+
+	// Validate profile port number
+	if cfg.Profile != "" {
+
+	}
+
+	// Don't allow ban durations that too short.
+	if cfg.BanDuration < time.Second {
+
+	}
+
+	// Validate any given whitelisted IP address and networks.
+	if len(cfg.whitelists) > 0 {
+		
+	}
 	
+	// --addPeer and --connect do not mix 
+	if len(cfg.AddPeers) > 0 && len(cfg.ConnectPeers) > 0 {
+
+	}
+
+	// --proxy or --connect without --listen disables listening.
+	if (cfg.Proxy != "" || len(cfg.ConnectPeers) > 0) &&
+		len(cfg.Listeners) == 0 {
+
+	}
+
+	// Connect means no DNS seeding.
+	if len(cfg.ConnectPeers) > 0 {
+		cfg.DisableDNSSeed = true
+	}
+
+	// Add the default listener if none were specified. The default
+	// listener is all addresses on the listen port for the network
+	// we are to connect to.
+	if len(cfg.Listeners) == 0 {
+		cfg.Listeners = []string{net.JoinHostPort("", activeNetParams.DefaultPort)}
+	}
+
+	// Check to make sure limited and admin users don't have the same name
+	if cfg.RPCUser == cfg.RPCLimitUser && cfg.RPCUser != "" {
+
+	}
+
+	// Check to make sure limited and admin users don't have the same password
+	if cfg.RPCPass == cfg.RPCLimitPass && cfg.RPCPass != "" {
+
+	}
+
+	// The RPC server is disabled if no username or password is provided.
+	if (cfg.RPCUser == "" || cfg.RPCPass == "") &&
+		(cfg.RPCLimitUser == "" || cfg.RPCLimitPass == ""){
+
+	}
+
+	if cfg.DisableRPC {
+		btcdLog.Infof("RPC service is disabled")
+	}
+
+	// Default RPC to listen on localhost only
+	if !cfg.DisableRPC && len(cfg.RPCListeners) > 0 {
+
+	}
+
+	if cfg.RPCMaxConcurrentReqs < 0 {
+
+	}
+
+	// Validate the minrelaytxfee.
+	cfg.minRelayTxFee, err = btcutil.NewAmount(cfg.MinRelayTxFee)
+	if err != nil {
+
+	}
+
+	// Limit the max block size to a sane value.
+	if cfg.BlockMaxSize < blockMaxSizeMin || cfg.BlockMaxSize > blockMaxSizeMax {
+		str := "%s: The blockmaxsize option must be in between %d " +
+			"and  %d -- parsed[%d]"
+		err := fmt.Errorf(str,funcName, blockMaxSizeMin, blockMaxSizeMax, cfg.BlockMaxSize)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Limit the max block weight to a sane value.
+	if cfg.BlockMaxWeight < blockMaxWeightMin || cfg.BlockMaxWeight > blockMaxWeightMax {
+		str := "%s: The blockmaxweight option must be in between %d " +
+			"and %d -- parsed[%d]"
+		err := fmt.Errorf(str, funcName, blockMaxWeightMin, blockMaxWeightMax, cfg.BlockMaxWeight)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Limit the max orphan count to a sane value
+	if cfg.MaxOrphanTxs < 0 {
+		str := "%s: The maxorphantx option may not be less than 0 " +
+			"-- parsed[%d]"
+		err := fmt.Errorf(str, funcName, cfg.MaxOrphanTxs)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Limit the block priority and minimum block sizes to max block size
+	cfg.BlockPrioritySize = minUint32(cfg.BlockPrioritySize, cfg.BlockMaxSize)
+	cfg.BlockMinSize = minUint32(cfg.BlockMinSize, cfg.BlockMaxSize)
+	cfg.BlockMinWeight = minUint32(cfg.BlockMinWeight, cfg.BlockMaxWeight)
+
+	switch  {
+	// If the max block size isn't set, but the max weight is, then we'll
+	// set the limit for the max block size to a safe limit so weight takes
+	// precedence
+	case cfg.BlockMaxSize == defaultBlockMaxSize &&
+		cfg.BlockMaxWeight != defaultBlockMaxWeight:
+
+			cfg.BlockMaxSize = blockchain.MaxBlockBaseSize - 1000
+	// If the max block weight isn't set, but the block size is, then we'll
+	// scale the set weight accordingly based on the max block size value.
+    case cfg.BlockMaxSize != defaultBlockMaxSize &&
+				cfg.BlockMaxWeight == defaultBlockMaxWeight:
+
+			cfg.BlockMaxWeight = cfg.BlockMaxSize * blockchain.WitnessScaleFactor
+
+	}
+
+	// Look for illegal characters in the user agent comments.
+	for _, uaComment := range cfg.UserAgentComments {
+		if strings.ContainsAny(uaComment, "/:()") {
+			err := fmt.Errorf("%s: The following characters must not " +
+				"appear in user agent comments: '/', ':', '(', ')'", funcName)
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, usageMessage)
+			return nil, nil, err
+		}
+	}
+
+	// --txindex and --droptxindex do not mix
+	if cfg.TxIndex && cfg.DropTxIndex {
+		str := "%s: the --txindex and --droptxindex " +
+			"options may no be activeted at the same time"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// --addrindex and --droptxindex do not mix.
+	if cfg.AddrIndex && cfg.DropTxIndex {
+		str := "%s: --addrindex and --droptxindex " +
+			"options may not be activated at the same time " +
+			"because the address index relies on the transaction index"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Check mining address are valid and saved parsed versions.
+	cfg.miningAddrs = make([]btcutil.Address, 0, len(cfg.MiningAddrs))
+	//for _, strAddr := range cfg.MiningAddrs {
+	//	add, err :=
+	//}
+
+	fmt.Println(configFileError)
+	fmt.Println(remainingArgs)
 	return &cfg, nil, nil
 }
 
