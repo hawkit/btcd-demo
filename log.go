@@ -1,7 +1,18 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"btcd-demo/btclog"
+	"path/filepath"
+	"os"
+	"github.com/jrick/logrotate/rotator"
+)
 
+var (
+
+	logRotator *rotator.Rotator
+
+)
 type Level uint32
 
 type sLoger struct {
@@ -11,6 +22,28 @@ type sLoger struct {
 var (
 	btcdLog = new(sLoger)
 )
+
+var subsystemLoggers = map[string]btclog.Logger{
+
+}
+
+// initLogRotator initializes the logging rotator to writer logs to logFile and
+// create roll files in the same directory. It must be called before the
+// package-global log rotater variables are used.
+func initLogRotator(logFile string)  {
+	logDir, _ := filepath.Split(logFile)
+	err := os.MkdirAll(logDir, 0700)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create log directory: %v\n", err)
+		os.Exit(1)
+	}
+	r, err := rotator.New(logFile, 10 * 1024, false, 3)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create file rotator: %v\n", err)
+		os.Exit(1)
+	}
+	logRotator = r
+}
 
 func (l *sLoger)Tracef(format string, params ...interface{}) {
 
@@ -90,4 +123,24 @@ func (l* sLoger)Level() Level {
 func (l* sLoger)SetLevel(level Level) {
 
 }
+
+
+func setLogLevels(logLevel string) {
+	for subSystemID := range subsystemLoggers {
+		setLogLevel(subSystemID, logLevel)
+	}
+}
+
+func setLogLevel(subsytemID string, logLevel string){
+	// Ignore invalid subsystems
+	logger, ok := subsystemLoggers[subsytemID]
+	if !ok {
+		return
+	}
+
+	// Defaults to info if the log level is invalid
+	level, _ := btclog.LevelFromString(logLevel)
+	logger.SetLevel(level)
+}
+
 
