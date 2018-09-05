@@ -2,61 +2,6 @@
 
 
 [[projects]]
-  digest = "1:e4b4f8ae8292e68d6a08c781e8835f7a0f4816fd7ec1beb30e01cc79dbe50c23"
-  name = "github.com/btcsuite/btcd"
-  packages = [
-    "blockchain",
-    "btcec",
-    "chaincfg",
-    "database",
-    "txscript",
-    "wire",
-  ]
-  pruneopts = "UT"
-  revision = "177f09ba00534415054c2e9bb37104cf5d9616c0"
-  version = "BTCD_0_11_0_BETA"
-
-[[projects]]
-  branch = "master"
-  digest = "1:30d4a548e09bca4a0c77317c58e7407e2a65c15325e944f9c08a7b7992f8a59e"
-  name = "github.com/btcsuite/btclog"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "84c8d2346e9fc8c7b947e243b9c24e6df9fd206a"
-
-[[projects]]
-  digest = "1:b737e06e4a86c484742b54daeef16d16d6c2e6afecd6c6e7db410370fa7b5c81"
-  name = "github.com/btcsuite/btcutil"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "af89ed1c2e6bb43f3b030f49225ce7eda4cddf98"
-  version = "BTCUTIL_0_0_1"
-
-[[projects]]
-  branch = "master"
-  digest = "1:f5a785a2836dce1d5a46a313275fe868c332090a3709b5aa58b84e1368ae006f"
-  name = "github.com/btcsuite/fastsha256"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "637e656429416087660c84436a2a035d69d54e2e"
-
-[[projects]]
-  branch = "master"
-  digest = "1:49ad1acb33bb5b40c0d197321d3cf9ee9a29eb02f4765ab7c316e08983eb7559"
-  name = "github.com/btcsuite/golangcrypto"
-  packages = ["ripemd160"]
-  pruneopts = "UT"
-  revision = "53f62d9b43e87a6c56975cf862af7edf33a8d0df"
-
-[[projects]]
-  digest = "1:65145f64d82b08438f9a31219d0911eb29e941ac105a2d4047de5441d6c2a1b0"
-  name = "github.com/conformal/btcwire"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "69b27dd5d3effb7229e9cc759e87ec9836ce3942"
-  version = "BTCWIRE_0_0_1"
-
-[[projects]]
   branch = "master"
   digest = "1:a28145666510ad8f4eba207f7b5a82c6941b42390f1d981ba23e2a0ba6c9c95c"
   name = "github.com/hawkit/btcutil-demo"
@@ -84,7 +29,6 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
-    "github.com/btcsuite/btcd/blockchain",
     "github.com/hawkit/btcutil-demo",
     "github.com/jessevdk/go-flags",
     "github.com/jrick/logrotate/rotator",
