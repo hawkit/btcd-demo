@@ -3,7 +3,6 @@ package database
 import "fmt"
 
 type SimpleDB struct {
-	
 }
 
 func (db *SimpleDB) Type() string {

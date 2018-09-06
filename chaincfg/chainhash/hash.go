@@ -1,8 +1,8 @@
 package chainhash
 
 import (
-	"fmt"
 	"encoding/hex"
+	"fmt"
 )
 
 // HashSize of array used to store hashes.
@@ -19,7 +19,7 @@ type Hash [HashSize]byte
 
 // Decode decodes the byte-reversed hexadecimal string encoding of a Hash to a
 // destination
-func Decode(dst *Hash, src string) error  {
+func Decode(dst *Hash, src string) error {
 	// Return error if hash string is too long.
 	if len(src) > MaxHashStringSize {
 		return ErrHashStrSize
@@ -50,7 +50,6 @@ func Decode(dst *Hash, src string) error  {
 	}
 	return nil
 }
-
 
 // NewHashFromStr creates a Hash from a hash string. The string should be
 // the hexadecimal string of a byte-reversed hash, but any missing characters

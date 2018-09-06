@@ -1,27 +1,23 @@
 package main
 
 import (
-	"runtime/debug"
-	"runtime"
-	"fmt"
-	"os"
-	"net"
 	"btcd-demo/database"
 	"btcd-demo/limits"
+	"fmt"
+	"net"
+	"os"
+	"runtime"
+	"runtime/debug"
 )
 
 var (
 	cfg *config
 )
 
-
-
-func winServiceMain()(bool, error) {
+func winServiceMain() (bool, error) {
 	fmt.Println("btcd service runing...")
 	return true, nil
 }
-
-
 
 func btcdMain(serverChan chan<- *server) error {
 
@@ -99,7 +95,7 @@ func btcdMain(serverChan chan<- *server) error {
 		btcdLog.Errorf("Failed to start server on %v: %v", cfg.Listeners, err)
 		return err
 	}
-	defer func(){
+	defer func() {
 		btcdLog.Infof("Gracefully shutting down the server...")
 		server.Stop()
 		server.WaitForShutdown()
@@ -115,11 +111,11 @@ func btcdMain(serverChan chan<- *server) error {
 	return nil
 }
 
-func loadBlockDB()(database.DB, error)  {
+func loadBlockDB() (database.DB, error) {
 	return &database.SimpleDB{}, nil
 }
 
-func main()  {
+func main() {
 
 	//设置cpu最大使用数量，这里全部使用
 	runtime.GOMAXPROCS(runtime.NumCPU())

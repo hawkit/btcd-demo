@@ -13,9 +13,9 @@ const (
 	LevelOff
 )
 
-func LevelFromString(s string)(l Level, ok bool)  {
+func LevelFromString(s string) (l Level, ok bool) {
 	switch strings.ToLower(s) {
-	case "trace","trc":
+	case "trace", "trc":
 		return LevelTrace, true
 	case "debug", "dbg":
 		return LevelDebug, true

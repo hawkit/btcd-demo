@@ -1,11 +1,9 @@
 package limits
 
 import (
-	"syscall"
 	"fmt"
+	"syscall"
 )
-
-
 
 const (
 	fileLimitWant = 2048

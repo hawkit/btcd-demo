@@ -1,8 +1,6 @@
 package wire
 
-
 type BitcoinNet uint32
-
 
 // Constants used to indicate the message bitcoin network. They can also be
 // used to seek to the next message when a stream's state is unknown, but

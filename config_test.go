@@ -1,12 +1,12 @@
 package main
 
 import (
-	"testing"
-	"runtime"
-	"path/filepath"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
+	"testing"
 )
 
 var (
@@ -14,7 +14,7 @@ var (
 	rpcpassRegexp = regexp.MustCompile("(?m)^rpcpass=.+$")
 )
 
-func TestCreateDefaultConfigFile(t *testing.T)  {
+func TestCreateDefaultConfigFile(t *testing.T) {
 	// find out where the sample config lives
 	_, path, _, ok := runtime.Caller(0)
 	if !ok {
@@ -45,7 +45,7 @@ func TestCreateDefaultConfigFile(t *testing.T)  {
 	}
 
 	// clean up
-	defer func(){
+	defer func() {
 		os.Remove(testPath)
 		os.Remove(tmpConfigFile)
 		os.Remove(tmpDir)
@@ -67,7 +67,5 @@ func TestCreateDefaultConfigFile(t *testing.T)  {
 	if !rpcpassRegexp.Match(content) {
 		t.Error("Could not find rpcpass in generated default config file.")
 	}
-
-
 
 }
