@@ -19,6 +19,9 @@ import (
 	"sort"
 	"btcd-demo/database"
 	"btcd-demo/blockchain"
+	"strconv"
+	"btcd-demo/chaincfg/chainhash"
+	"github.com/hawkit/go-socks/socks"
 )
 
 const (
@@ -270,6 +273,85 @@ func validDbType(dbType string) bool {
 	}
 
 	return false
+}
+
+// normalizeAddress returns addr with the passed default port appended if
+// there is not already a port specified.
+func normalizeAddress(addr, defaultPort string) string {
+	_, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return net.JoinHostPort(addr, defaultPort)
+	}
+	return addr
+}
+
+// normalizeAddresses returns a new slice with all the passed peer addresses
+// normalized with the given default port, and all duplicates removed.
+func normalizeAddresses(addrs []string, defaultPort string) []string  {
+	for i, addr := range addrs {
+		addrs[i] = normalizeAddress(addr, defaultPort)
+	}
+	return removeDuplicateAddresses(addrs)
+}
+
+// removeDuplicateAddress returns a new slice with all duplicate entries in
+// addrs removed.
+func removeDuplicateAddresses(addrs []string) []string  {
+	result := make([]string, 0, len(addrs))
+	seen := map[string]struct{}{}
+
+	for _, addr := range addrs {
+		if _, ok := seen[addr];  !ok {
+			seen[addr] = struct{}{}
+			result = append(result, addr)
+		}
+	}
+	return result
+}
+
+// newCheckpointFromStr parses checkpoints in the '<height>:<hash>' format.
+func newCheckpointFromStr(checkpoint string) (chaincfg.Checkpoint, error) {
+	parts := strings.Split(checkpoint, ":")
+	if len(parts) != 2 {
+		return chaincfg.Checkpoint{}, fmt.Errorf("unable to parse " +
+			"checkpoint %q -- use the syntax <height>:<hash>", checkpoint)
+	}
+
+	height, err := strconv.ParseInt(parts[0], 10, 32)
+	if err != nil {
+		return chaincfg.Checkpoint{}, fmt.Errorf("unable to parse " +
+			"checkpoint %q due to malformed height", checkpoint)
+	}
+
+	if len(parts[1]) == 0 {
+		return chaincfg.Checkpoint{}, fmt.Errorf("unable to parse " +
+			"checkpoint %q due to missing hash", checkpoint)
+	}
+	hash, err := chainhash.NewHashFromStr(parts[1])
+	if err != nil {
+		return chaincfg.Checkpoint{}, fmt.Errorf("unable to parse " +
+			"checkpoint %q due to malformed hash", checkpoint)
+	}
+	return chaincfg.Checkpoint{
+		Height:int32(height),
+		Hash: hash,
+	}, nil
+}
+// parseCheckpoints checks the checkpoint strings for valide syntask
+// ('<height>:<hash>') and parses them to chaincfg.Checkpoint instances.
+func parseCheckpoints(checkpointStrings []string) ([]chaincfg.Checkpoint, error) {
+	if len(checkpointStrings) == 0 {
+		return nil, nil
+	}
+	checkpoints := make([]chaincfg.Checkpoint, len(checkpointStrings))
+	for i, cpString := range checkpointStrings {
+		cp, err := newCheckpointFromStr(cpString)
+		if err != nil {
+			return nil, err
+		}
+		checkpoints[i] = cp
+	}
+	return checkpoints, nil
 }
 
 // newConfigParser returns a new command line flags parser
@@ -656,9 +738,140 @@ func loadConfig()(*config, []string, error)  {
 
 	// Check mining address are valid and saved parsed versions.
 	cfg.miningAddrs = make([]btcutil.Address, 0, len(cfg.MiningAddrs))
-	//for _, strAddr := range cfg.MiningAddrs {
-	//	add, err :=
-	//}
+	for _, strAddr := range cfg.MiningAddrs {
+		addr, err := btcutil.DecodeAddress(strAddr, activeNetParams.Params)
+		if err != nil {
+			str := "%s : mining address '%s' failed to decode: %v"
+			err := fmt.Errorf(str, funcName, strAddr, err)
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, usageMessage)
+			return nil, nil, err
+		}
+
+		if !addr.IsForNet(activeNetParams.Params) {
+			str := "%s: mining address '%s' is on the wrong network"
+			err := fmt.Errorf(str, funcName, strAddr)
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, usageMessage)
+			return nil, nil, err
+		}
+		cfg.miningAddrs = append(cfg.miningAddrs, addr)
+	}
+
+	// Ensure there is at least one mining address when the generate flag
+	// is set.
+	if cfg.Generate && len(cfg.miningAddrs) == 0 {
+		str := "%s: the generate flag is set, but there are no mining " +
+			"address specified"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Add default port to all listener addresses if needed and remove
+	// duplicate address.
+	cfg.Listeners = normalizeAddresses(cfg.Listeners, activeNetParams.DefaultPort)
+
+	// Add default port to all rpc listener addresses if needed and remove
+	// duplicate address
+	cfg.RPCListeners = normalizeAddresses(cfg.RPCListeners, activeNetParams.rpcPort)
+
+	// Only allow TLS to be disable if the RPC is bound to localhost
+	// address
+	if !cfg.DisableRPC && cfg.DisableTLS {
+		allowedTLSListeners := map[string]struct{}{
+			"localhost": {},
+			"127.0.0.1": {},
+			"::1": {},
+		}
+		for _, addr := range cfg.RPCListeners {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				str := "%s: RPC listen interface '%s' is " +
+					"invalide: %v"
+				err := fmt.Errorf(str, funcName, addr, err)
+				fmt.Fprintln(os.Stderr, err)
+				fmt.Fprintln(os.Stderr, usageMessage)
+				return nil, nil, err
+			}
+			if _, ok := allowedTLSListeners[host]; !ok {
+				str := "%s: the --notls option may not be used " +
+					"when binding RPC to non localhost " +
+					"addresses: %s"
+				err := fmt.Errorf(str, funcName, addr)
+				fmt.Fprintln(os.Stderr, err)
+				fmt.Fprintln(os.Stderr, usageMessage)
+				return nil, nil, err
+			}
+		}
+	}
+
+	// Add default port to all added peer addresses if needed and remove
+	// duplicate addresses
+	cfg.AddPeers = normalizeAddresses(cfg.AddPeers, activeNetParams.DefaultPort)
+	cfg.ConnectPeers = normalizeAddresses(cfg.ConnectPeers, activeNetParams.DefaultPort)
+
+	// --noonion adn --onion do not mix
+	if cfg.NoOnion && cfg.OnionProxy != "" {
+		err := fmt.Errorf("%s: the --noonion and --onion options may " +
+			"not be activated at the same time", funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Check the checkpoints for syntax errors
+	cfg.addCheckpoints, err = parseCheckpoints(cfg.AddCheckpoints)
+	if err != nil {
+		str := "%s: Error parsing checkpoints: %v"
+		err := fmt.Errorf(str, funcName, err)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Tor strem isolation requires either proxy or onion proxy to be set
+	if cfg.TorIsolation && cfg.Proxy == "" && cfg.OnionProxy == "" {
+		str := "%s: Tor stream isolation requires either proxy or " +
+			"onionproxy to be set"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Setup dial and DNS resolution (lookup) functions depending on the
+	// specified options. The default is to use the standard net.DialTimeout
+	// function as well as the system DNS resolver. When a proxy is specified,
+	// the dial function is set to the proxy specific dial function and the
+	// lookup is set to use tor (unless --noonion is specified in which case
+	// the system DNS resolver is used).
+	cfg.dial = net.DialTimeout
+	cfg.lookup = net.LookupIP
+	if cfg.Proxy != "" {
+		_, _, err := net.SplitHostPort(cfg.Proxy)
+		if err != nil {
+			str := "%s: Proxy address '%s' is invalid: %v"
+			err := fmt.Errorf(str, funcName, cfg.Proxy, err)
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, usageMessage)
+			return nil, nil, err
+		}
+
+		// Tor isolation flag means proxy credentials will be overridden
+		// unless there is also an onion proxy configured in which case
+		// that one will be overridden
+		torIsolation := false
+		if cfg.TorIsolation && cfg.OnionProxy == "" &&
+			(cfg.ProxyUser != "" || cfg.ProxyPass != "") {
+				torIsolation = true
+				fmt.Fprintln(os.Stderr, "Tor isolation set -- " +
+					"overriding specified proxy user credentials")
+		}
+
+		proxy := socks.Proxy{}
+	}
 
 	fmt.Println(configFileError)
 	fmt.Println(remainingArgs)

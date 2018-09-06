@@ -10,6 +10,14 @@
   revision = "ed4526f6cd3d131d909ab44538de0cea990c32d7"
 
 [[projects]]
+  branch = "master"
+  digest = "1:1e6b2f7aa98b082c30a1303c29a702c369b2ec6d86b74a599bc8bbe2333db299"
+  name = "github.com/hawkit/go-socks"
+  packages = ["socks"]
+  pruneopts = "UT"
+  revision = "4720035b7bfd2a9bb130b1c184f8bbe41b6f0d0f"
+
+[[projects]]
   digest = "1:a2cff208d4759f6ba1b1cd228587b0a1869f95f22542ec9cd17fff64430113c7"
   name = "github.com/jessevdk/go-flags"
   packages = ["."]
@@ -38,6 +46,7 @@
   analyzer-version = 1
   input-imports = [
     "github.com/hawkit/btcutil-demo",
+    "github.com/hawkit/go-socks/socks",
     "github.com/jessevdk/go-flags",
     "github.com/jrick/logrotate/rotator",
   ]
