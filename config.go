@@ -17,14 +17,15 @@ import (
 	"btcd-demo/database"
 	"btcd-demo/mempool"
 	"fmt"
+	"runtime"
+	"sort"
+	"strconv"
+
 	"github.com/btcsuite/btcd/connmgr"
 	"github.com/hawkit/btcutil-demo"
 	"github.com/hawkit/go-socks/socks"
 	flags "github.com/jessevdk/go-flags"
 	"github.com/pkg/errors"
-	"runtime"
-	"sort"
-	"strconv"
 )
 
 const (
@@ -353,6 +354,16 @@ func parseCheckpoints(checkpointStrings []string) ([]chaincfg.Checkpoint, error)
 		checkpoints[i] = cp
 	}
 	return checkpoints, nil
+}
+
+// filesExists reports whether the named file or directory exists.
+func fileExists(name string) bool {
+	if _, err := os.Stat(name); err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+	}
+	return true
 }
 
 // newConfigParser returns a new command line flags parser

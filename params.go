@@ -13,6 +13,7 @@ type params struct {
 }
 
 var mainNetParams = params{
+	Params: &chaincfg.MainNetParams,
 	rpcPort: "8334",
 }
 

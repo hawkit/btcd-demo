@@ -51,6 +51,32 @@ var MainNetParams = Params{
 	RelayNonStdTxs: false,
 }
 
+var RegressionNetParams = Params{
+	Name:        "regtest",
+	Net:         wire.TestNet,
+	DefaultPort: "18444",
+
+	// Mempool parameters
+	RelayNonStdTxs: true,
+}
+
+var TestNet3Params = Params{
+	Name:        "testnet3",
+	Net:         wire.TestNet3,
+	DefaultPort: "18333",
+
+	// Mempool parameters
+	RelayNonStdTxs: true,
+}
+
+var SimNetParams = Params{
+	Name:        "simnet",
+	Net:         wire.SimNet,
+	DefaultPort: "18555",
+
+	// Mempool parameters
+	RelayNonStdTxs: true,
+}
 // IsBech32SegwitPrefix returns whether the prefix is a known prefix for segwit
 // addresses on any default or registered network. This is used when decoding
 // an address string into a specific address type
