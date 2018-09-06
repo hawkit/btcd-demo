@@ -22,6 +22,9 @@ import (
 	"strconv"
 	"btcd-demo/chaincfg/chainhash"
 	"github.com/hawkit/go-socks/socks"
+	"github.com/btcsuite/btcd/connmgr"
+	"github.com/pkg/errors"
+	"btcd-demo/mempool"
 )
 
 const (
@@ -389,14 +392,14 @@ func loadConfig()(*config, []string, error)  {
 		DbType:defaultDbType,
 		RPCKey:defaultRPCKeyFile,
 		RPCCert:defaultRPCCertFile,
-		MinRelayTxFee: btcutil.Amount(1000).ToBTC(), //todo   mempool.DefaultMinRelayTxFee.ToBTC(),
+		MinRelayTxFee: mempool.DefaultMinRelayTxFee.ToBTC(),
 		FreeTxRelayLimit:defaultFreeTxRelayLimit,
 		TrickleInterval: defaultTrickleInterval,
 		BlockMinSize:defaultBlockMinSize,
 		BlockMaxSize:defaultBlockMaxSize,
 		BlockMinWeight:defaultBlockMinWeight,
 		BlockMaxWeight:defaultBlockMaxWeight,
-		BlockPrioritySize:50000, //todo  mempool.DefaultBlockPrioritySize,
+		BlockPrioritySize:mempool.DefaultBlockPrioritySize,
 		MaxOrphanTxs:defaultMaxOrphanTxSize,
 		SigCacheMaxSize:defaultSigCacheMaxSize,
 		Generate:defaultGenerate,
@@ -576,33 +579,82 @@ func loadConfig()(*config, []string, error)  {
 	}
 	// Validate database type
 	if !validDbType(cfg.DbType) {
-
+		str := "%s; The specified database type [%v] is invalid -- " +
+			"supported types %v"
+		err := fmt.Errorf(str, funcName, cfg.DbType, knownDbTypes)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
 	}
 
 	// Validate profile port number
 	if cfg.Profile != "" {
-
+		profilePort, err := strconv.Atoi(cfg.Profile)
+		if err != nil || profilePort < 1024 || profilePort > 65535 {
+			str := "%s: The profile port must be between 1024 and 65535"
+			err := fmt.Errorf(str, funcName)
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprint(os.Stderr, usageMessage)
+			return nil, nil, err
+		}
 	}
 
 	// Don't allow ban durations that too short.
 	if cfg.BanDuration < time.Second {
-
+		str := "%s: The banduration option may not be less than 1s -- parsed [%v]"
+		err := fmt.Errorf(str, funcName, cfg.BanDuration)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
 	}
 
+
 	// Validate any given whitelisted IP address and networks.
-	if len(cfg.whitelists) > 0 {
-		
+	if len(cfg.Whitelists) > 0 {
+		var ip net.IP
+		cfg.whitelists = make([]*net.IPNet, 0, len(cfg.Whitelists))
+
+		for _, addr := range cfg.Whitelists {
+			_, ipnet, err := net.ParseCIDR(addr)
+			if err != nil {
+				ip = net.ParseIP(addr)
+				if ip == nil {
+					str := "%s: The whitelist value of '%s' is invalid"
+					err = fmt.Errorf(str, funcName, addr)
+					fmt.Fprintln(os.Stderr, err)
+					fmt.Fprintln(os.Stderr, usageMessage)
+					return nil, nil, err
+				}
+				var bits int
+				if ip.To4() == nil {
+					// IPv6
+					bits = 128
+				} else {
+					bits = 32
+				}
+				ipnet = &net.IPNet{
+					IP: ip,
+					Mask: net.CIDRMask(bits, bits),
+				}
+			}
+			cfg.whitelists = append(cfg.whitelists, ipnet)
+		}
 	}
 	
 	// --addPeer and --connect do not mix 
 	if len(cfg.AddPeers) > 0 && len(cfg.ConnectPeers) > 0 {
-
+		str := "%s: the --addpeer and --connect options can not be " +
+			"mixed"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
 	}
 
 	// --proxy or --connect without --listen disables listening.
 	if (cfg.Proxy != "" || len(cfg.ConnectPeers) > 0) &&
 		len(cfg.Listeners) == 0 {
-
+			cfg.DisableListen = true
 	}
 
 	// Connect means no DNS seeding.
@@ -619,18 +671,28 @@ func loadConfig()(*config, []string, error)  {
 
 	// Check to make sure limited and admin users don't have the same name
 	if cfg.RPCUser == cfg.RPCLimitUser && cfg.RPCUser != "" {
-
+		str := "%s: --rpcuser and --rpclimituser must not specify the " +
+			"same username"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
 	}
 
 	// Check to make sure limited and admin users don't have the same password
 	if cfg.RPCPass == cfg.RPCLimitPass && cfg.RPCPass != "" {
-
+		str := "%s: --rpcpass and --rpclimitpass must not specify the " +
+			"same password"
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
 	}
 
 	// The RPC server is disabled if no username or password is provided.
 	if (cfg.RPCUser == "" || cfg.RPCPass == "") &&
 		(cfg.RPCLimitUser == "" || cfg.RPCLimitPass == ""){
-
+		cfg.DisableRPC = true
 	}
 
 	if cfg.DisableRPC {
@@ -639,17 +701,34 @@ func loadConfig()(*config, []string, error)  {
 
 	// Default RPC to listen on localhost only
 	if !cfg.DisableRPC && len(cfg.RPCListeners) > 0 {
-
+		addrs, err := net.LookupHost("localhost")
+		if err != nil {
+			return nil, nil, err
+		}
+		cfg.RPCListeners = make([]string, 0, len(addrs))
+		for _, addr := range addrs {
+			addr = net.JoinHostPort(addr, activeNetParams.rpcPort)
+			cfg.RPCListeners = append(cfg.RPCListeners, addr)
+		}
 	}
 
 	if cfg.RPCMaxConcurrentReqs < 0 {
-
+		str := "%s: The rpcmaxwebsocketconcurrentrequests option may " +
+			"not be less than 0 -- parsed [%d]"
+		err := fmt.Errorf(str, funcName, cfg.RPCMaxConcurrentReqs)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
 	}
 
 	// Validate the minrelaytxfee.
 	cfg.minRelayTxFee, err = btcutil.NewAmount(cfg.MinRelayTxFee)
 	if err != nil {
-
+		str := "%s: invalid minrelaytxfee: %v"
+		err := fmt.Errorf(str, funcName, err)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
 	}
 
 	// Limit the max block size to a sane value.
@@ -870,12 +949,85 @@ func loadConfig()(*config, []string, error)  {
 					"overriding specified proxy user credentials")
 		}
 
-		proxy := socks.Proxy{}
+		proxy := socks.Proxy{
+			Addr: cfg.Proxy,
+			Username: cfg.ProxyUser,
+			Password: cfg.ProxyPass,
+			TorIsolation:torIsolation,
+		}
+		cfg.dial = proxy.DialTimeout
+
+		// Treat the proxy as tor and perform DNS resolution through it
+		// unless the --noonion flag is set or there is an onion-specific
+		// proxy configured
+		if !cfg.NoOnion && cfg.OnionProxy == "" {
+			cfg.lookup = func(host string) ([]net.IP, error) {
+				return connmgr.TorLookupIP(host, cfg.Proxy)
+			}
+		}
 	}
 
-	fmt.Println(configFileError)
-	fmt.Println(remainingArgs)
-	return &cfg, nil, nil
+	// Setup onion address dial function depending on the specified options.
+	// The default is to use the same dail function selected above. However,
+	// when an onion-specific proxy is specified, the onion address dial
+	// function is set to use the onion-specific proxy while leaving the
+	// normal dial function as selected above. This allows .onion address
+	// traffic to be routed through a different proxy than normal traffic.
+	if cfg.OnionProxy != "" {
+		_, _, err := net.SplitHostPort(cfg.OnionProxy)
+		if err != nil {
+			str := "%s: Onion proxy address '%s' is invalid: %v"
+			err := fmt.Errorf(str, funcName, cfg.OnionProxy, err)
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, usageMessage)
+			return nil, nil, err
+		}
+
+		// Tor isolation flag means onion proxy credentials will be overriden
+		if cfg.TorIsolation &&
+			(cfg.OnionProxyUser != "" || cfg.OnionProxyPass != "") {
+				fmt.Fprintln(os.Stderr, "Tor isolation set -- " +
+					"overriding specified onionproxy user " +
+					"credentials")
+		}
+
+		cfg.oniondial = func(network, addr string, timeout time.Duration) (net.Conn, error) {
+			proxy := &socks.Proxy{
+				Addr: cfg.OnionProxy,
+				Username: cfg.OnionProxyUser,
+				Password: cfg.OnionProxyPass,
+				TorIsolation: cfg.TorIsolation,
+			}
+			return proxy.DialTimeout(network, addr, timeout)
+		}
+
+		// When configured in bridge mode (both --onion and --proxy are configured)
+		// it means that the proxy configured by --proxy is not a tor proxy, so
+		// override the DNS resolution to use the onion-specific proxy
+		if cfg.Proxy != "" {
+			cfg.lookup = func(host string) ([]net.IP, error) {
+				return connmgr.TorLookupIP(host, cfg.OnionProxy)
+			}
+		}
+	} else {
+		cfg.oniondial = cfg.dial
+	}
+
+	// Specifying --noonion means the onion address dial function results in an error.
+	if cfg.NoOnion {
+		cfg.oniondial = func(s string, s2 string, duration time.Duration) (net.Conn, error) {
+			return nil, errors.New("tor has been disabled.")
+		}
+	}
+
+	// Warn about missing config file only after all other configuration is done.
+	// This prevent the warning on help messages and invalid options. Note this
+	// should go directly before the return
+	if configFileError != nil {
+		btcdLog.Warnf("%v", configFileError)
+	}
+
+	return &cfg, remainingArgs, nil
 }
 
 // createDefaultConfig copies the file sample-btcd.conf to the given destination path,
