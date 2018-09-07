@@ -1,8 +1,9 @@
 package database
 
 import (
-	"btcd-demo/btclog"
 	"fmt"
+
+	"github.com/hawkit/btclog-demo"
 )
 
 // Driver defines a structure for backend drivers to use when they

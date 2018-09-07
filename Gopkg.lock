@@ -24,6 +24,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:c396148d9d484ba742b2e6958d01556f6da9f169aeb18f9eda0e99aa605ceb15"
+  name = "github.com/hawkit/btclog-demo"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "ee26ccccd56abe285d57aceb6f18087c5f0250bc"
+
+[[projects]]
+  branch = "master"
   digest = "1:e6508efdc17a7cdef39c5fb8a22444d2b05decaa4b2bdc1f9b904705f3cae73d"
   name = "github.com/hawkit/btcutil-demo"
   packages = ["."]
@@ -67,10 +75,12 @@
   analyzer-version = 1
   input-imports = [
     "github.com/btcsuite/btcd/connmgr",
+    "github.com/hawkit/btclog-demo",
     "github.com/hawkit/btcutil-demo",
     "github.com/hawkit/go-socks/socks",
     "github.com/jessevdk/go-flags",
     "github.com/jrick/logrotate/rotator",
+    "github.com/pkg/errors",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

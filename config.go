@@ -2,6 +2,7 @@ package main
 
 import (
 	"btcd-demo/chaincfg"
+	"btcd-demo/peer"
 	"bufio"
 	"crypto/rand"
 	"encoding/base64"
@@ -20,6 +21,8 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+
+	_ "btcd-demo/database/ffldb"
 
 	"github.com/btcsuite/btcd/connmgr"
 	"github.com/hawkit/btcutil-demo"
@@ -43,15 +46,15 @@ const (
 	defaultMaxRPCConcurrentReqs  = 20
 	defaultDbType                = "ffldb"
 	defaultFreeTxRelayLimit      = 15.0
-	defaultTrickleInterval       = 10 * time.Second // todo peer.DefaultTrickleInterval
+	defaultTrickleInterval       = peer.DefaultTrickleInterval
 	defaultBlockMinSize          = 0
 	defaultBlockMaxSize          = 750000
 	defaultBlockMinWeight        = 0
 	defaultBlockMaxWeight        = 3000000
 	blockMaxSizeMin              = 1000
-	blockMaxSizeMax              = 1000 //todo blockchain.MaxBlockBaseSize - 1000
+	blockMaxSizeMax              = blockchain.MaxBlockBaseSize - 1000
 	blockMaxWeightMin            = 4000
-	blockMaxWeightMax            = 4000 //todo blockchain.MaxBlockWeight - 4000
+	blockMaxWeightMax            = blockchain.MaxBlockWeight - 4000
 	defaultGenerate              = false
 	defaultMaxOrphanTransactions = 100
 	defaultMaxOrphanTxSize       = 100000
@@ -385,6 +388,7 @@ func newConfigParser(cfg *config, so *serviceOptions, options flags.Options) *fl
 //
 
 func loadConfig() (*config, []string, error) {
+
 	// Default config.
 	cfg := config{
 		ConfigFile:           defaultConfigFile,

@@ -37,6 +37,11 @@
   name = "github.com/jrick/logrotate"
   version = "1.0.0"
 
+[[constraint]]
+  branch = "master"
+  name = "github.com/hawkit/btclog-demo"
+
+
 [prune]
   go-tests = true
   unused-packages = true
