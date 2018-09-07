@@ -1,6 +1,7 @@
 package main
 
 import (
+	"btcd-demo/database"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,6 +51,7 @@ var (
 // Initialize package-global logger variables.
 func init() {
 
+	database.UseLogger(bcdbLog)
 }
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.
