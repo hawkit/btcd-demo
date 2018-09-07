@@ -1,13 +1,11 @@
 package main
 
 import (
-	"btcd-demo/database"
 	"btcd-demo/chaincfg"
+	"btcd-demo/database"
 )
 
-
 type server struct {
-
 }
 
 func newServer(listeners []string, db database.DB, chainParams *chaincfg.Params, interrupt <-chan struct{}) (*server, error) {

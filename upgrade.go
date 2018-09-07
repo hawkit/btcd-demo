@@ -1,6 +1,6 @@
 package main
 
-func doUpgrades() error  {
+func doUpgrades() error {
 	btcdLog.Info("doUpgrades done")
 	return nil
 }
