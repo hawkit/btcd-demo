@@ -8,27 +8,28 @@ import (
 var activeNetParams = &mainNetParams
 
 type params struct {
-	 * chaincfg.Params
-	 rpcPort string
+	*chaincfg.Params
+	rpcPort string
 }
 
 var mainNetParams = params{
-	rpcPort:"8334",
+	Params: &chaincfg.MainNetParams,
+	rpcPort: "8334",
 }
 
 var regressionNetParams = params{
-	rpcPort:"18334",
+	rpcPort: "18334",
 }
 
 var testNet3Params = params{
-	rpcPort:"18334",
+	rpcPort: "18334",
 }
 
 var simNetParams = params{
-	rpcPort:"18556",
+	rpcPort: "18556",
 }
 
-func netName(chainParams *params)  string {
+func netName(chainParams *params) string {
 	switch chainParams.Net {
 	case wire.TestNet3:
 		return "testnet"
@@ -36,4 +37,3 @@ func netName(chainParams *params)  string {
 		return chainParams.Name
 	}
 }
-

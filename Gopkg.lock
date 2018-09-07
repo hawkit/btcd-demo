@@ -2,19 +2,17 @@
 
 
 [[projects]]
-  digest = "1:e4b4f8ae8292e68d6a08c781e8835f7a0f4816fd7ec1beb30e01cc79dbe50c23"
+  branch = "master"
+  digest = "1:ed23b0fe22b8d34044a31853a7d497153c5dfb08332cb997e2b40b8a766ae901"
   name = "github.com/btcsuite/btcd"
   packages = [
-    "blockchain",
-    "btcec",
     "chaincfg",
-    "database",
-    "txscript",
+    "chaincfg/chainhash",
+    "connmgr",
     "wire",
   ]
   pruneopts = "UT"
-  revision = "177f09ba00534415054c2e9bb37104cf5d9616c0"
-  version = "BTCD_0_11_0_BETA"
+  revision = "cff30e1d23fc9e800b2b5b4b41ef1817dda07e9f"
 
 [[projects]]
   branch = "master"
@@ -25,44 +23,28 @@
   revision = "84c8d2346e9fc8c7b947e243b9c24e6df9fd206a"
 
 [[projects]]
-  digest = "1:b737e06e4a86c484742b54daeef16d16d6c2e6afecd6c6e7db410370fa7b5c81"
-  name = "github.com/btcsuite/btcutil"
+  branch = "master"
+  digest = "1:c396148d9d484ba742b2e6958d01556f6da9f169aeb18f9eda0e99aa605ceb15"
+  name = "github.com/hawkit/btclog-demo"
   packages = ["."]
   pruneopts = "UT"
-  revision = "af89ed1c2e6bb43f3b030f49225ce7eda4cddf98"
-  version = "BTCUTIL_0_0_1"
+  revision = "ee26ccccd56abe285d57aceb6f18087c5f0250bc"
 
 [[projects]]
   branch = "master"
-  digest = "1:f5a785a2836dce1d5a46a313275fe868c332090a3709b5aa58b84e1368ae006f"
-  name = "github.com/btcsuite/fastsha256"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "637e656429416087660c84436a2a035d69d54e2e"
-
-[[projects]]
-  branch = "master"
-  digest = "1:49ad1acb33bb5b40c0d197321d3cf9ee9a29eb02f4765ab7c316e08983eb7559"
-  name = "github.com/btcsuite/golangcrypto"
-  packages = ["ripemd160"]
-  pruneopts = "UT"
-  revision = "53f62d9b43e87a6c56975cf862af7edf33a8d0df"
-
-[[projects]]
-  digest = "1:65145f64d82b08438f9a31219d0911eb29e941ac105a2d4047de5441d6c2a1b0"
-  name = "github.com/conformal/btcwire"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "69b27dd5d3effb7229e9cc759e87ec9836ce3942"
-  version = "BTCWIRE_0_0_1"
-
-[[projects]]
-  branch = "master"
-  digest = "1:a28145666510ad8f4eba207f7b5a82c6941b42390f1d981ba23e2a0ba6c9c95c"
+  digest = "1:e6508efdc17a7cdef39c5fb8a22444d2b05decaa4b2bdc1f9b904705f3cae73d"
   name = "github.com/hawkit/btcutil-demo"
   packages = ["."]
   pruneopts = "UT"
-  revision = "19272c081f6783c22bc7c0bd6885bb225a13fde4"
+  revision = "ed4526f6cd3d131d909ab44538de0cea990c32d7"
+
+[[projects]]
+  branch = "master"
+  digest = "1:1e6b2f7aa98b082c30a1303c29a702c369b2ec6d86b74a599bc8bbe2333db299"
+  name = "github.com/hawkit/go-socks"
+  packages = ["socks"]
+  pruneopts = "UT"
+  revision = "4720035b7bfd2a9bb130b1c184f8bbe41b6f0d0f"
 
 [[projects]]
   digest = "1:a2cff208d4759f6ba1b1cd228587b0a1869f95f22542ec9cd17fff64430113c7"
@@ -80,14 +62,25 @@
   revision = "a93b200c26cbae3bb09dd0dc2c7c7fe1468a034a"
   version = "v1.0.0"
 
+[[projects]]
+  digest = "1:40e195917a951a8bf867cd05de2a46aaf1806c50cf92eebf4c16f78cd196f747"
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
-    "github.com/btcsuite/btcd/blockchain",
+    "github.com/btcsuite/btcd/connmgr",
+    "github.com/hawkit/btclog-demo",
     "github.com/hawkit/btcutil-demo",
+    "github.com/hawkit/go-socks/socks",
     "github.com/jessevdk/go-flags",
     "github.com/jrick/logrotate/rotator",
+    "github.com/pkg/errors",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

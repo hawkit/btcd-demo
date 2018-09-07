@@ -1,6 +1,5 @@
 package main
 
-
 func interruptListener() <-chan struct{} {
 	c := make(chan struct{})
 	return c
@@ -8,9 +7,9 @@ func interruptListener() <-chan struct{} {
 
 func interruptRequested(interrupted <-chan struct{}) bool {
 	select {
-		case <- interrupted:
-			return true
-		default:
+	case <-interrupted:
+		return true
+	default:
 	}
 	return false
 }

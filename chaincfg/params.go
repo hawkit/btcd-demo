@@ -3,8 +3,8 @@ package chaincfg
 import (
 	"btcd-demo/chaincfg/chainhash"
 	"btcd-demo/wire"
-	"strings"
 	"errors"
+	"strings"
 )
 
 type Params struct {
@@ -24,12 +24,11 @@ type Params struct {
 	// Human-readable part for Bech32 encoded segwit addresses, as defined
 	// in BIP 173.
 	Bech32HRPSegwit string
-
 }
 
 type Checkpoint struct {
 	Height int32
-	Hash *chainhash.Hash
+	Hash   *chainhash.Hash
 }
 
 var (
@@ -37,22 +36,55 @@ var (
 	// network could not be set due to the network already being a standard
 	// network or previously-registered into this package.
 	ErrDuplicatedNet = errors.New("duplicated Bitcoin network")
-
 )
 var (
-	registeredNets = make(map[wire.BitcoinNet]struct{})
+	registeredNets       = make(map[wire.BitcoinNet]struct{})
 	bech32SegwitPrefixes = make(map[string]struct{})
 )
 
+var MainNetParams = Params{
+	Name:        "mainnet",
+	Net:         wire.MainNet,
+	DefaultPort: "8333",
+
+	// Mempool parameters
+	RelayNonStdTxs: false,
+}
+
+var RegressionNetParams = Params{
+	Name:        "regtest",
+	Net:         wire.TestNet,
+	DefaultPort: "18444",
+
+	// Mempool parameters
+	RelayNonStdTxs: true,
+}
+
+var TestNet3Params = Params{
+	Name:        "testnet3",
+	Net:         wire.TestNet3,
+	DefaultPort: "18333",
+
+	// Mempool parameters
+	RelayNonStdTxs: true,
+}
+
+var SimNetParams = Params{
+	Name:        "simnet",
+	Net:         wire.SimNet,
+	DefaultPort: "18555",
+
+	// Mempool parameters
+	RelayNonStdTxs: true,
+}
 // IsBech32SegwitPrefix returns whether the prefix is a known prefix for segwit
 // addresses on any default or registered network. This is used when decoding
 // an address string into a specific address type
-func isBech32SegwitPrefix(prefix string) bool  {
+func IsBech32SegwitPrefix(prefix string) bool {
 	prefix = strings.ToLower(prefix)
 	_, ok := bech32SegwitPrefixes[prefix]
 	return ok
 }
-
 
 // Register registers the network parameters for a Bitcoin network.  This may
 // error with ErrDuplicateNet if the network is already registered (either
@@ -74,5 +106,3 @@ func Register(params *Params) error {
 	bech32SegwitPrefixes[params.Bech32HRPSegwit+"1"] = struct{}{}
 	return nil
 }
-
-
