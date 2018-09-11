@@ -9,6 +9,15 @@ type OutPoint struct {
 	Index uint32
 }
 
+// NewOutPoint returns a new bitcoin transaction outpoint point with the
+// provided hash and index.
+func NewOutPoint(hash *chainhash.Hash, index uint32) *OutPoint {
+	return &OutPoint{
+		Hash:  *hash,
+		Index: index,
+	}
+}
+
 type TxWitness [][]byte
 
 // TxIn defines a bitcion transaction input.
