@@ -51,8 +51,8 @@
   version = "v1.0.0"
 
 [[projects]]
-  branch = "master"
-  digest = "1:57a3361a34c90264d74668c9f29f6c501c746f38459768b6aac25b989c01ca71"
+  branch = "database"
+  digest = "1:c7dfefb4317ae3b785c66a2b57d4b4fa0f54dc80e6461e9ae0fbde85ddf881a6"
   name = "github.com/hawkit/btcd-demo"
   packages = [
     "chaincfg",
@@ -60,7 +60,7 @@
     "wire",
   ]
   pruneopts = "UT"
-  revision = "ceec5cf624b56b8f6e395016a57f161bb74eb572"
+  revision = "5863aeb32d36ac6e3d77d95de1c0335ff410a1ff"
 
 [[projects]]
   branch = "master"
@@ -72,11 +72,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:2ef73da7284701d03c6174fbe95ef979e687bf346cb7f80de13a56fba4d20e9e"
+  digest = "1:f8f83b4a0742d6da44e8a46c358d53b30270053bba7cb92cc493acd4eb26d4eb"
   name = "github.com/hawkit/btcutil-demo"
   packages = ["."]
   pruneopts = "UT"
-  revision = "ba59cf5a11fcf0a814d5ab0228dc625a191e279f"
+  revision = "4f5e9b5b44d3c9fcf5c6b66fcd0ffe4d5efcfd2e"
 
 [[projects]]
   branch = "master"
@@ -127,6 +127,7 @@
   input-imports = [
     "github.com/btcsuite/btcd/connmgr",
     "github.com/hawkit/btcd-demo/chaincfg",
+    "github.com/hawkit/btcd-demo/chaincfg/chainhash",
     "github.com/hawkit/btclog-demo",
     "github.com/hawkit/btcutil-demo",
     "github.com/hawkit/go-socks/socks",

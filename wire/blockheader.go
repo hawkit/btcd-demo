@@ -4,7 +4,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
+	"bytes"
+
+	"github.com/btcsuite/btcd/wire"
+
+	"btcd-demo/chaincfg/chainhash"
 )
 
 // BlockHeader defines information about a block and is used to in the bitcoin
@@ -34,4 +38,15 @@ const blockHeaderLen = 80
 
 func (h *BlockHeader) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
 	return writeBlockHeader(w, pver, h)
+}
+
+// BlockHash computes the block identifier hash for the given block header.
+func (h *BlockHeader) BlockHash() chainhash.Hash {
+	// Encode the header and double sha256 everything prior to the number of
+	// transactions. Ignore the error returns since there is no way the
+	// encode could fail except being out of memory which would cause a
+	// run-time panic.
+	buf := bytes.NewBuffer(make([]byte, 0, wire.MaxBlockHeaderPayload))
+	_ = writeBlockHeader(buf, 0, h)
+	return chainhash.DoubleHashH(buf.Bytes())
 }

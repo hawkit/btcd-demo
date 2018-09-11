@@ -5,10 +5,11 @@ import (
 	"btcd-demo/wire"
 	"sync"
 
-	"btcd-demo/chaincfg/chainhash"
-
 	"btcd-demo/database/internal/treap"
 
+	"fmt"
+
+	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
 	"github.com/hawkit/btcutil-demo"
 	"github.com/hawkit/goleveldb/leveldb"
 	ldberrors "github.com/hawkit/goleveldb/leveldb/errors"
@@ -151,6 +152,14 @@ type transaction struct {
 // Enforce transaction implements the database.Tx interface
 var _ database.Tx = (*transaction)(nil)
 
+// checkClosed returns an error if the database or transaction is closed.
+func (tx *transaction) checkClosed() error {
+	if tx.closed {
+		return makeDbErr(database.ErrTxClosed, ErrTxClosedStr, nil)
+	}
+	return nil
+}
+
 func (tx *transaction) Metadata() database.Bucket {
 	return tx.metaBucket
 }
@@ -166,7 +175,44 @@ func (tx *transaction) Metadata() database.Bucket {
 // - ErrTxClosed if the transaction has already been closed
 func (tx *transaction) StoreBlock(block *btcutil.Block) error {
 
-	//todo
+	// Ensure transaction state is valid
+	if err := tx.checkClosed(); err != nil {
+		return err
+	}
+
+	// Ensure the transaction is writable.
+	if !tx.writable {
+		str := "store block requires a writable database transaction"
+		return makeDbErr(database.ErrTxNotWritable, str, nil)
+	}
+
+	// Reject the block if it already exists.
+	blockHash := block.Hash()
+	if tx.hasBlock(blockHash) {
+		str := fmt.Sprintf("block %s already exists", blockHash)
+		return makeDbErr(database.ErrBlockExists, str, nil)
+	}
+
+	blockBytes, err := block.Bytes()
+	if err != nil {
+		str := fmt.Sprintf("failed to get serialzed bytes for block %s", blockHash)
+		return makeDbErr(database.ErrDriverSpecific, str, err)
+	}
+
+	// Add the block to be stored to the list of pending blocks to store
+	// when the transaction is committed. Also, add it to pending blocks
+	// map so it is easy to determine the block is pending based on the
+	// block hash.
+	if tx.pendingBlocks == nil {
+		tx.pendingBlocks = make(map[chainhash.Hash]int)
+	}
+	tx.pendingBlocks[*blockHash] = len(tx.pendingBlockData)
+	tx.pendingBlockData = append(tx.pendingBlockData, pendingBlock{
+		hash:  blockHash,
+		bytes: blockBytes,
+	})
+	log.Tracef("Added block %s to pending blocks", blockHash)
+
 	return nil
 }
 
