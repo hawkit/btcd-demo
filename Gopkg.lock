@@ -3,6 +3,55 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:ed23b0fe22b8d34044a31853a7d497153c5dfb08332cb997e2b40b8a766ae901"
+  name = "github.com/btcsuite/btcd"
+  packages = [
+    "chaincfg",
+    "chaincfg/chainhash",
+    "connmgr",
+    "wire",
+  ]
+  pruneopts = "UT"
+  revision = "cff30e1d23fc9e800b2b5b4b41ef1817dda07e9f"
+
+[[projects]]
+  branch = "master"
+  digest = "1:30d4a548e09bca4a0c77317c58e7407e2a65c15325e944f9c08a7b7992f8a59e"
+  name = "github.com/btcsuite/btclog"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "84c8d2346e9fc8c7b947e243b9c24e6df9fd206a"
+
+[[projects]]
+  digest = "1:cd7d6fb5b2ce7f7370434d883e538de5e56a6da10409a5d169001cb827f0303a"
+  name = "github.com/btcsuite/goleveldb"
+  packages = [
+    "leveldb/cache",
+    "leveldb/comparer",
+    "leveldb/errors",
+    "leveldb/filter",
+    "leveldb/iterator",
+    "leveldb/journal",
+    "leveldb/memdb",
+    "leveldb/opt",
+    "leveldb/storage",
+    "leveldb/table",
+    "leveldb/util",
+  ]
+  pruneopts = "UT"
+  revision = "3fd0373267b6461dbefe91cef614278064d05465"
+  version = "v1.0.0"
+
+[[projects]]
+  digest = "1:f9bf7ab1aef6d501f1c51179e96d75a75526a85fd0f18bb2b285eaae058df084"
+  name = "github.com/btcsuite/snappy-go"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "b3db38edf0a9a11a115eb6b022d8c946024a9ac0"
+  version = "v1.0.0"
+
+[[projects]]
+  branch = "master"
   digest = "1:57a3361a34c90264d74668c9f29f6c501c746f38459768b6aac25b989c01ca71"
   name = "github.com/hawkit/btcd-demo"
   packages = [
@@ -38,6 +87,17 @@
   revision = "4720035b7bfd2a9bb130b1c184f8bbe41b6f0d0f"
 
 [[projects]]
+  branch = "master"
+  digest = "1:3c83459c8197339a5a1d1773de089b877db1483f4857337162230304a5bb3561"
+  name = "github.com/hawkit/goleveldb"
+  packages = [
+    "leveldb",
+    "leveldb/errors",
+  ]
+  pruneopts = "UT"
+  revision = "3fd0373267b6461dbefe91cef614278064d05465"
+
+[[projects]]
   digest = "1:a2cff208d4759f6ba1b1cd228587b0a1869f95f22542ec9cd17fff64430113c7"
   name = "github.com/jessevdk/go-flags"
   packages = ["."]
@@ -66,9 +126,12 @@
   analyzer-version = 1
   input-imports = [
     "github.com/btcsuite/btcd/connmgr",
+    "github.com/hawkit/btcd-demo/chaincfg",
     "github.com/hawkit/btclog-demo",
     "github.com/hawkit/btcutil-demo",
     "github.com/hawkit/go-socks/socks",
+    "github.com/hawkit/goleveldb/leveldb",
+    "github.com/hawkit/goleveldb/leveldb/errors",
     "github.com/jessevdk/go-flags",
     "github.com/jrick/logrotate/rotator",
     "github.com/pkg/errors",

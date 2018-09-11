@@ -1,7 +1,6 @@
 package main
 
 import (
-	"btcd-demo/chaincfg"
 	"btcd-demo/peer"
 	"bufio"
 	"crypto/rand"
@@ -25,6 +24,7 @@ import (
 	_ "btcd-demo/database/ffldb"
 
 	"github.com/btcsuite/btcd/connmgr"
+	"github.com/hawkit/btcd-demo/chaincfg"
 	"github.com/hawkit/btcutil-demo"
 	"github.com/hawkit/go-socks/socks"
 	flags "github.com/jessevdk/go-flags"

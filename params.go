@@ -1,8 +1,9 @@
 package main
 
 import (
-	"btcd-demo/chaincfg"
 	"btcd-demo/wire"
+
+	"github.com/hawkit/btcd-demo/chaincfg"
 )
 
 var activeNetParams = &mainNetParams
@@ -13,7 +14,7 @@ type params struct {
 }
 
 var mainNetParams = params{
-	Params: &chaincfg.MainNetParams,
+	Params:  &chaincfg.MainNetParams,
 	rpcPort: "8334",
 }
 

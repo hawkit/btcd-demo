@@ -1,8 +1,9 @@
 package main
 
 import (
-	"btcd-demo/chaincfg"
 	"btcd-demo/database"
+
+	"github.com/hawkit/btcd-demo/chaincfg"
 )
 
 type server struct {
