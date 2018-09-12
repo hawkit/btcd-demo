@@ -16,6 +16,37 @@ type dbCacheSnapshot struct {
 	pendingRemove *treap.Immutable
 }
 
+func (snap *dbCacheSnapshot) Has(key []byte) bool {
+	// Check the cached entries first.
+	if snap.pendingRemove.Has(key) {
+		return false
+	}
+	if snap.pendingKeys.Has(key) {
+		return true
+	}
+	// Consult the database
+	hasKey, _ := snap.dbSnapshot.Has(key, nil)
+	return hasKey
+}
+
+func (snap *dbCacheSnapshot) Get(key []byte) []byte {
+	// Check the cached entries first.
+	if snap.pendingRemove.Has(key) {
+		return nil
+	}
+
+	if value := snap.pendingKeys.Get(key); value != nil {
+		return value
+	}
+
+	// Consult the database.
+	value, err := snap.dbSnapshot.Get(key, nil)
+	if err != nil {
+		return nil
+	}
+	return value
+}
+
 // dbCache provides a database cache layer backed by an underlying database. It
 // allows a maximum cache size and flush interval to be specified such that the
 // cache is flushed to the database when the cache size exceeds the maximum

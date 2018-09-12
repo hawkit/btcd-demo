@@ -1,5 +1,7 @@
 package treap
 
+import "bytes"
+
 // Immutable represents a treap data struct which is used to hold ordered
 // key/value pairs using a combination of binary search tree and heap semantics.
 // It is a self-organizing and randomized data struct that doesn't require
@@ -23,4 +25,41 @@ type Immutable struct {
 	// totalSize is the best estimate of the total size of all data in
 	// the treap including the keys, values, and node sizes.
 	totalSize uint64
+}
+
+// get returns the treap node that contains the passed key. It will return nil
+// when the key dose not exist.
+func (t *Immutable) get(key []byte) *treapNode {
+	for node := t.root; node != nil; {
+		// Traverse left or right depending on the result of the
+		// comparison
+		compareResult := bytes.Compare(key, node.key)
+		if compareResult < 0 {
+			node = node.left
+			continue
+		}
+		if compareResult > 0 {
+			node = node.right
+			continue
+		}
+
+		// The key exists.
+		return node
+	}
+	return nil
+}
+
+func (t *Immutable) Get(key []byte) []byte {
+	if node := t.get(key); node != nil {
+		return node.value
+	}
+	return nil
+}
+
+// Has returns whether or not the passed key exists
+func (t *Immutable) Has(key []byte) bool {
+	if node := t.get(key); node != nil {
+		return true
+	}
+	return false
 }

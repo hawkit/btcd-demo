@@ -11,6 +11,11 @@ import (
 	"btcd-demo/chaincfg/chainhash"
 )
 
+// MaxBlockHeaderPayload is the maximum block number of bytes a block header can be.
+// Version 4 bytes + Timestamp 4 bytes + Bits 4 bytes + Nonce 4 bytes +
+// PrevBlock and MerkleRoot hashes.
+const MaxBlockHeaderPayload = 16 + (chainhash.HashSize * 2)
+
 // BlockHeader defines information about a block and is used to in the bitcoin
 // block (MsgBlock) and headers (MsgHeaders) messages.
 type BlockHeader struct {
