@@ -1,6 +1,10 @@
 package database
 
-import "btcd-demo/chaincfg/chainhash"
+import (
+	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
+
+	"github.com/hawkit/btcutil-demo"
+)
 
 // Cursor represents a cursor over key/value pairs and nested buckets of a
 // bucket.
@@ -206,11 +210,241 @@ type Tx interface {
 	// - ErrBlockExists when the block hash already exists
 	// - ErrTxNotWritable if attempted against a read-only transaction
 	// - ErrExClosed if the transaction has already been closed
-	//StoreBlock(block *btcu)
+	StoreBlock(block *btcutil.Block) error
+
+	// HasBlock returns whether or not a block with the given hash exists
+	// in the database
+	//
+	// The interface contract guarantees at least the following errors will
+	// be returned (other implementation-specific error are possible):
+	// - ErrExClosed if the transaction has already been closed
+	//
+	// Other errors are possible depending on the implementation.
+	HasBlock(hash *chainhash.Hash) (bool, error)
+
+	// HasBlocks returns whether or not the blocks with the provided hashes
+	// exist in the database.
+	//
+	// The interface contract guarantees at least the following errors will
+	// be returned (other implementation-specific errors are possible):
+	//   - ErrTxClosed if the transaction has already been closed
+	//
+	// Other errors are possible depending on the implementation.
+	HasBlocks(hashes []*chainhash.Hash) ([]bool, error)
+
+	// FetchBlockHeader returns the raw serialized bytes for the block
+	// header identified by the given hash. The raw bytes are in the format
+	// returned by Serialize on a wire.BlockHeader
+	//
+	// It is highly recommended to use this function (or FetchBlockHeaders)
+	// to obtain block headers over the FetchBlockRegion(s) functions since
+	// it provides the backend drivers the freedom to perform very specific
+	// optimizations which can result in significant speed advantages when
+	// working with headers.
+	//
+	// The interface contract guarantees at least the following errors will
+	// be returned (other implementation-specific errors are possible):
+	// - ErrBlockNotFound if the requested block hash does not exist
+	// - ErrTxClosed if the transaction has already been closed
+	// - ErrCorruption if the database has somehow become corrupted
+	//
+	// NOTE: The data returned by this function is only valid during a
+	// database transaction. Attempting to access it after a transaction
+	// has ended results in undefined behavior. This constraint prevents
+	// additional data copies and allows support for memory-mapped database
+	// implementations.
+	FetchBlockHeader(hash *chainhash.Hash) ([]byte, error)
+
+	// FetchBlockHeaders returns the raw serialized bytes for the block
+	// headers identified by the given hashes. The raw bytes are in the
+	// format returned by Serialize on a wire.BlockHeader.
+	//
+	// It is highly recommended to use this function (or FetchBlockHeader)
+	// to obtain block headers over the FetchBlockRegion(s) functions since
+	// it provides the backend drivers the freedom to perform very specific
+	// optimizations which can result in significant speed advantages when
+	// working with headers.
+	//
+	// Furthermore, depending on the specific implementation, this function
+	// can be more efficient for bulk loading multiple block headers than
+	// loading them one-by-one which FetchBlockHeader.
+	//
+	// The interface contract guarantees at least the following errors will
+	// be returned (other implementation-specific errors are possible)
+	// - ErrBlockNotFound if any the request block hashes do not exist
+	// - ErrTxClose if the transaction has already bee closed
+	// - ErrCorruption if the database has somehow become corrupted
+	//
+	// NOTE: The data returned by this function is only valid during a
+	// database transaction. Attempting to access it after a transaction
+	// has ended results in undefined behavior. This constraint prevents
+	// additional copies and allows support for memory-mapped database
+	// implementations.
+	FetchBlockHeaders(hashes []*chainhash.Hash) ([][]byte, error)
+
+	// FetchBlock returns the raw serialized bytes for the block identified
+	// by the given hash. The raw bytes are in the format returned by Serialized
+	// on a wire.MsgBlock.
+	//
+	// The interface contract guarantees at least the following errors will
+	// be returned (other implementation-specific errors are possible)
+	// - ErrBlockNotFound if the requested block hash dose not exist
+	// - ErrTxClose if the transaction has already been closed
+	// - ErrCorruption if the database has somehow become corrupted
+	//
+	// NOTE: The data returned by this function is only valid during a
+	// database transaction.  Attempting to access it after a transaction
+	// has ended results in undefined behavior.  This constraint prevents
+	// additional data copies and allows support for memory-mapped database
+	// implementations.
+	FetchBlock(hash *chainhash.Hash) ([]byte, error)
+
+	// FetchBlocks returns the raw serialized bytes for the blocks identified
+	// by the given hashes. The raw bytes are in the format returned by
+	// Serialize on a wire.MsgBlock.
+	//
+	// The interface contract guarantees at least the following errors will
+	// be returned (other implementation-specific errors are possible):
+	//   - ErrBlockNotFound if the any of the requested block hashes do not
+	//     exist
+	//   - ErrTxClosed if the transaction has already been closed
+	//   - ErrCorruption if the database has somehow become corrupted
+	//
+	// NOTE: The data returned by this function is only valid during a
+	// database transaction.  Attempting to access it after a transaction
+	// has ended results in undefined behavior.  This constraint prevents
+	// additional data copies and allows support for memory-mapped database
+	// implementations.
+	FetchBlocks(hashes []*chainhash.Hash) ([][]byte, error)
+
+	// FetchBlockRegion returns the raw serialized bytes for the given
+	// block region.
+	//
+	// For example, it is possible to directly extract Bitcion transactions
+	// and/or scripts from a block with this function. Depending on the
+	// backend implementation, this can provide significant savings by
+	// avoiding the need to load entire blocks.
+	//
+	// The raw bytes are in the format returned by Serialize on a
+	// wire.MsgBlock and the Offset field in the provided BlockRegion is
+	// zero-based and relative to the start of the block (byte 0).
+	//
+	// The interface contract guarantees at least the following errors will
+	// be returned (other implementation-specific errors are possible).
+	//  - ErrBlockNotFound if the requested block hash dose not exist
+	//  - ErrBlockRegionInvalid if the region exceeds the bounds of the
+	// 	associated block
+	//  - ErrTxClosed if the transaction has already been closed
+	//  - ErrCorruption if the database has somehow become corrupted
+	//
+	// NOTE: The data returned by this function is only valid during a
+	// database transaction.  Attempting to access it after a transaction
+	// has ended results in undefined behavior.  This constraint prevents
+	// additional data copies and allows support for memory-mapped database
+	// implementations.
+	FetchBlockRegion(region *BlockRegion) ([]byte, error)
+
+	// FetchBlockRegions returns the raw serialized bytes for the given
+	// block regions.
+	//
+	// For example, it is possible to directly extract Bitcoin transactions
+	// and/or scripts from various blocks with this function.  Depending on
+	// the backend implementation, this can provide significant savings by
+	// avoiding the need to load entire blocks.
+	//
+	// The raw bytes are in the format returned by Serialize on a
+	// wire.MsgBlock and the Offset fields in the provided BlockRegions are
+	// zero-based and relative to the start of the block (byte 0).
+	//
+	// The interface contract guarantees at least the following errors will
+	// be returned (other implementation-specific errors are possible):
+	//   - ErrBlockNotFound if any of the requested block hashed do not
+	//     exist
+	//   - ErrBlockRegionInvalid if one or more region exceed the bounds of
+	//     the associated block
+	//   - ErrTxClosed if the transaction has already been closed
+	//   - ErrCorruption if the database has somehow become corrupted
+	//
+	// NOTE: The data returned by this function is only valid during a
+	// database transaction.  Attempting to access it after a transaction
+	// has ended results in undefined behavior.  This constraint prevents
+	// additional data copies and allows support for memory-mapped database
+	// implementations.
+	FetchBlockRegions(regions []*BlockRegion) ([][]byte, error)
+
+	// ******************************************************************
+	// Methods related to both atomic metadata storage and block storage.
+	// ******************************************************************
+
+	// Commit commits all changes that have been made to the metadata or
+	// block storage. Depending on the backend implementation this could be
+	// to a cache that is periodically synced to persistent storage or
+	// directly to persistent storage. In any case, all transactions which
+	// are started after the commit finishes will include all changes made
+	// by this transaction. Calling this function on a managed transaction will
+	// result in a panic.
+	Commit() error
+
+	// Rollback undoes all changes that have made to the metadata or block
+	// storage. Calling this function on a managed transaction will result
+	// in a panic.
+	Rollback() error
 }
 
+// DB provides a generic interface that is used to store bitcoin blocks and
+// related metadata. This interface is intended to be agnostic to the actual
+// mechanism used for backend data storage. The RegisterDriver function can
+// be used to add a new backend data storage methods.
+//
+// This interface is divided into two distinct categories of functionality.
+//
+// The first category is atomic metadata storage with bucket support. This is
+// accomplished through the use of database transactions.
+//
+// The second category is generic block storage. This functionality is
+// intentionally separate because the mechanism used for block storage
+// may or may not be the same mechanism used for metadata storage. For
+// example, it is often more efficient to store the block data as flat
+// files while the metadata is kept in a database. However, this interface
+// aims to be generic enough to support blocks in the database too, if
+// needed by a particular backend.
 type DB interface {
+	// Type returns the database driver type the current database instance
+	// was created with.
 	Type() string
 
+	// Begin starts a transaction which is either read-only or read-write
+	// depending on the specified flag. Multiple read-only transactions
+	// can be started simultaneously while only a single read-write
+	// transaction can be started at a time. The call will block when
+	// starting a read-write transaction when one is already open.
+	//
+	// NOTE: The transaction must be closed by calling Rollback or Commit on
+	// it when it is no longer needed. Failure to do so can result in
+	// unclaimed memory and/or inablity to close the database due to locks
+	// depending on the specific database implementation.
+	Begin(writable bool) (Tx, error)
+
+	// View invokes the passed function in the context of a managed read-only
+	// transaction. Any errors returned from the user-supplied function
+	// are returned from this function.
+	//
+	// Calling Rollback or Commit on the transaction passed to the user-supplied
+	// function will result in a panic.
+	View(fn func(tx Tx) error) error
+
+	// Update invokes the passed function in the context of a managed
+	// read-write transaction. Any errors returned from the user-supplied
+	// function will cause the transaction to be rolled back and are
+	// returned from this function. Otherwise, the transaction is committed
+	// when the user-supplied function returns a nil error.
+	//
+	// Calling Rollback or Commit on the transaction passed to the
+	// user-supplied function will result in panic.
+	Update(fn func(tx Tx) error) error
+
+	// Close cleanly shuts down the database and syncs all data. It will
+	// block until all database transactions have been finalized (rolled back)
+	// or committed).
 	Close() error
 }

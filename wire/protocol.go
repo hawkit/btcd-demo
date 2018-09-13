@@ -2,6 +2,9 @@ package wire
 
 type BitcoinNet uint32
 
+// ServiceFlag identifies services supported by a bitcoin peer.
+type ServiceFlag uint64
+
 // Constants used to indicate the message bitcoin network. They can also be
 // used to seek to the next message when a stream's state is unknown, but
 // this package does not provide that functionality since it's generally a

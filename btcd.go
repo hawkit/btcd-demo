@@ -1,14 +1,15 @@
 package main
 
 import (
-	"btcd-demo/database"
-	"btcd-demo/limits"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+
+	"github.com/hawkit/btcd-demo/database"
+	"github.com/hawkit/btcd-demo/limits"
 )
 
 const (

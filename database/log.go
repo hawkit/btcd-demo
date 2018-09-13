@@ -9,7 +9,7 @@ var log btclog.Logger
 
 // The default amount of logging is none
 func init() {
-
+	DisableLog()
 }
 
 func DisableLog() {
