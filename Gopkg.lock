@@ -9,7 +9,6 @@
   revision = "b3db38edf0a9a11a115eb6b022d8c946024a9ac0"
   version = "v1.0.0"
 
-
 [[projects]]
   branch = "master"
   digest = "1:c396148d9d484ba742b2e6958d01556f6da9f169aeb18f9eda0e99aa605ceb15"
@@ -20,11 +19,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:5f0fd027094908b5a272b9b847ddffd1ec58c2435790e2940e6b7d3fe08201a3"
+  digest = "1:01de6d17da3a2973761017870b693c199192c8b6e258dd83f61263ff3d6c0520"
   name = "github.com/hawkit/btcutil-demo"
   packages = ["."]
   pruneopts = "UT"
-  revision = "bde5ce6e84142ee85d0e28ea04126823024391fb"
+  revision = "e0feb21b6229f17e61e6c6f28da855dc7b2e30e9"
 
 [[projects]]
   branch = "master"
@@ -36,14 +35,24 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:3c83459c8197339a5a1d1773de089b877db1483f4857337162230304a5bb3561"
+  digest = "1:e5c15686b7ff59344b33b6cef7c01a2490ccb2f833da11833bccbdfe37a27f22"
   name = "github.com/hawkit/goleveldb"
   packages = [
     "leveldb",
+    "leveldb/cache",
+    "leveldb/comparer",
     "leveldb/errors",
+    "leveldb/filter",
+    "leveldb/iterator",
+    "leveldb/journal",
+    "leveldb/memdb",
+    "leveldb/opt",
+    "leveldb/storage",
+    "leveldb/table",
+    "leveldb/util",
   ]
   pruneopts = "UT"
-  revision = "3fd0373267b6461dbefe91cef614278064d05465"
+  revision = "2c5b75ce6ac180f84e9cb3670c4b441751c5c452"
 
 [[projects]]
   digest = "1:a2cff208d4759f6ba1b1cd228587b0a1869f95f22542ec9cd17fff64430113c7"
@@ -73,9 +82,6 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
-    "github.com/hawkit/btcd-demo/chaincfg",
-    "github.com/hawkit/btcd-demo/chaincfg/chainhash",
-    "github.com/hawkit/btcd-demo/wire",
     "github.com/hawkit/btclog-demo",
     "github.com/hawkit/btcutil-demo",
     "github.com/hawkit/go-socks/socks",

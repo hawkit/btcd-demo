@@ -1,6 +1,7 @@
 package ffldb
 
 import (
+	"sort"
 	"sync"
 
 	"github.com/hawkit/btcd-demo/database"
@@ -58,7 +59,43 @@ var (
 	// blockIdxBucketID is the ID of the internal block metadata bucket.
 	// It is the value 1 encoded as an unsigned big-endian uint32
 	blockIdxBucketID = [4]byte{0x00, 0x00, 0x00, 0x01}
+
+	// writeLocKeyName is the key used to store the current write file
+	// location.
+	writeLockKeyName = []byte("ffldb-writeloc")
 )
+
+// bulkFetchData is allows a block location to be specified along with the
+// index it was requested from. This in turn allows the bulk data loading
+// functions to sort the data accesses based on the location to improve
+// performance while keeping track of which result the data is for.
+type bulkFetchData struct {
+	*blockLocation
+	replayIndex int
+}
+
+// bulkFetchDataSorter implements sort.Interface to allow a slice of
+// bulkFetchData to be sorted.  In particular it sorts by file and then
+// offset so that reads from files are grouped and linear.
+type bulkFetchDataSorter []bulkFetchData
+
+func (s bulkFetchDataSorter) Len() int {
+	return len(s)
+}
+
+func (s bulkFetchDataSorter) Less(i, j int) bool {
+	if s[i].blockFileNum < s[j].blockFileNum {
+		return true
+	}
+	if s[i].blockFileNum > s[j].blockFileNum {
+		return true
+	}
+	return s[i].fileOffset < s[j].fileOffset
+}
+
+func (s bulkFetchDataSorter) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
 
 // makeDbErr creates a database.Error given a set of arguments.
 func makeDbErr(c database.ErrorCode, desc string, err error) database.Error {
@@ -478,9 +515,9 @@ func (tx *transaction) FetchBlockHeaders(hashes []*chainhash.Hash) ([][]byte, er
 	// }
 	// return bytes, nil
 
-	regions := make([]*database.BlockRegion, len(hashes))
+	regions := make([]database.BlockRegion, len(hashes))
 	for i := range hashes {
-		regions[i] = &database.BlockRegion{
+		regions[i] = database.BlockRegion{
 			Hash:   hashes[i],
 			Offset: 0,
 			Len:    blockHdrSize,
@@ -489,12 +526,83 @@ func (tx *transaction) FetchBlockHeaders(hashes []*chainhash.Hash) ([][]byte, er
 	return tx.FetchBlockRegions(regions)
 }
 
+// FetchBlock returns the raw serialized bytes for the block identified by the given
+// hash. The raw bytes are in the format returned by Serialize on a wire.MsgBlock
+//
+// Returns the following errors as required by the interface contract:
+//   - ErrBlockNotFound if the requested block hash does not exist
+//   - ErrTxClosed if the transaction has already been closed
+//   - ErrCorruption if the database has somehow become corrupted
+//
+// In addition, returns ErrDriverSpecific if any failures occur when reading the
+// block files.
+//
+// NOTE: The data returned by this function is only valid during a database
+// transaction. Attempting to access it after a transaction has ended results
+// in undefined behavior. This constraint prevents additional data copies and
+// allows support for memory-mapped database implementations.
+//
+// This function is part of the database.Tx interface implementation.
 func (tx *transaction) FetchBlock(hash *chainhash.Hash) ([]byte, error) {
-	panic("implement me")
+	// Ensure transaction state is valid.
+	if err := tx.checkClosed(); err != nil {
+		return nil, err
+	}
+
+	// When the block is pending to be written on commit return the bytes
+	// from there.
+	if idx, exists := tx.pendingBlocks[*hash]; exists {
+		return tx.pendingBlockData[idx].bytes, nil
+	}
+
+	// Lookup the location of the block in the files from the block index.
+	blockRow, err := tx.fetchBlockRow(hash)
+	if err != nil {
+		return nil, err
+	}
+	location := deserializeBlockLoc(blockRow)
+
+	// Read the block from the appropriate location. The function also
+	// performs a checksum over the data to detect data corruption.
+	blockBytes, err := tx.db.store.readBlock(hash, location)
+	if err != nil {
+		return nil, err
+	}
+	return blockBytes, nil
 }
 
+// FetchBlocks returns the raw serialized bytes for the block identified by the given
+//  hash. The raw bytes are in the format returned by Serialize on a wire.MsgBlock
+//
+// Returns the following errors as required by the interface contract:
+//   - ErrBlockNotFound if the requested block hash does not exist
+//   - ErrTxClosed if the transaction has already been closed
+//   - ErrCorruption if the database has somehow become corrupted
+//
+// In addition, returns ErrDriverSpecific if any failures occur when reading the
+// block files.
+//
+// NOTE: The data returned by this function is only valid during a database
+// transaction. Attempting to access it after a transaction has ended results
+// in undefined behavior. This constraint prevents additional data copies and
+// allows support for memory-mapped database implementations.
+//
+// This function is part of the database.Tx interface implementation.
 func (tx *transaction) FetchBlocks(hashes []*chainhash.Hash) ([][]byte, error) {
-	panic("implement me")
+	// Ensure transaction state is valid.
+	if err := tx.checkClosed(); err != nil {
+		return nil, err
+	}
+	blocks := make([][]byte, len(hashes))
+
+	for idx, hash := range hashes {
+		var err error
+		blocks[idx], err = tx.FetchBlock(hash)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return blocks, nil
 }
 
 func (tx *transaction) fetchPendingRegion(region *database.BlockRegion) ([]byte, error) {
@@ -575,12 +683,209 @@ func (tx *transaction) FetchBlockRegion(region *database.BlockRegion) ([]byte, e
 	return regionBytes, nil
 }
 
-func (tx *transaction) FetchBlockRegions(regions []*database.BlockRegion) ([][]byte, error) {
-	panic("implement me")
+// FetchBlockRegions returns the raw serialized bytes for the given block
+// regions.
+//
+// For example, it is possible to directly extract Bitcoin transactions and/or
+// scripts from various blocks with this function.  Depending on the backend
+// implementation, this can provide significant savings by avoiding the need to
+// load entire blocks.
+//
+// The raw bytes are in the format returned by Serialize on a wire.MsgBlock and
+// the Offset fields in the provided BlockRegions are zero-based and relative to
+// the start of the block (byte 0).
+//
+// Returns the following errors as required by the interface contract:
+//   - ErrBlockNotFound if any of the request block hashes do not exist
+//   - ErrBlockRegionInvalid if one or more region exceed the bounds of the
+//     associated block
+//   - ErrTxClosed if the transaction has already been closed
+//   - ErrCorruption if the database has somehow become corrupted
+//
+// In addition, returns ErrDriverSpecific if any failures occur when reading the
+// block files.
+//
+// NOTE: The data returned by this function is only valid during a database
+// transaction.  Attempting to access it after a transaction has ended results
+// in undefined behavior.  This constraint prevents additional data copies and
+// allows support for memory-mapped database implementations.
+//
+// This function is part of the database.Tx interface implementation.
+func (tx *transaction) FetchBlockRegions(regions []database.BlockRegion) ([][]byte, error) {
+	// Ensure transaction state is valid.
+	if err := tx.checkClosed(); err != nil {
+		return nil, err
+	}
+
+	blockRegions := make([][]byte, len(regions))
+	fetchList := make([]bulkFetchData, 0, len(regions))
+
+	for i := range regions {
+		region := &regions[i]
+
+		// When the block is pending to be written on commit grab the
+		// bytes from there.
+		if tx.pendingBlocks != nil {
+			regionBytes, err := tx.fetchPendingRegion(region)
+			if err != nil {
+				return nil, err
+			}
+			if regionBytes != nil {
+				blockRegions[i] = regionBytes
+				continue
+			}
+
+		}
+
+		// Lookup the location of the block in the files from the block
+		// index.
+		blockRow, err := tx.fetchBlockRow(region.Hash)
+		if err != nil {
+			return nil, err
+		}
+		location := deserializeBlockLoc(blockRow)
+
+		// Ensure the region is within the bounds of the block.
+		endOffset := region.Offset + region.Len
+		if endOffset < region.Offset || endOffset > location.blockLen {
+			str := fmt.Sprintf("block %s region offset %d, length "+
+				"%d exceeds block length of %d", *region.Hash,
+				region.Offset, region.Len, location.blockLen)
+			return nil, makeDbErr(database.ErrBlockRegionInvalid, str, nil)
+		}
+
+		fetchList = append(fetchList, bulkFetchData{&location, i})
+	}
+	sort.Sort(bulkFetchDataSorter(fetchList))
+
+	// Read all of the regions in the fetch list and set the results.
+	for i := range fetchList {
+		fetchData := &fetchList[i]
+		ri := fetchData.replayIndex
+		region := &regions[ri]
+		location := fetchData.blockLocation
+		regionBytes, err := tx.db.store.readBlockRegion(*location, region.Offset, region.Len)
+		if err != nil {
+			return nil, err
+		}
+		blockRegions[ri] = regionBytes
+	}
+	return blockRegions, nil
 }
 
+// close marks the transaction closed then releases any pending data, the
+// underlying snapshot, the transaction read lock, and the write lock when
+// the transaction is writable.
+func (tx *transaction) close() {
+	tx.closed = true
+
+	// clear pending blocks that would have been written on commit.
+	tx.pendingBlocks = nil
+	tx.pendingBlockData = nil
+
+	// Clear pending keys that would have been written or deleted on commit.
+	tx.pendingKeys = nil
+	tx.pendingRemove = nil
+
+	// Release the snapshot.
+	if tx.snapshot != nil {
+		tx.snapshot.Release()
+		tx.snapshot = nil
+	}
+
+	tx.db.closeLock.RUnlock()
+
+	// Release the writer lock for writable transactions to unblock any
+	// other write transaction which are possibly waiting.
+	if tx.writable {
+		tx.db.writeLock.Unlock()
+	}
+}
+
+// writePendingAndCommit writes pending data to the flat block files, updates
+// the metadata with their locations as well as the new current write location,
+// and commits the metadata to the memory database cache. It also properly
+// handles rollback in the case of failures.
+//
+// This function MUST only be called when there is pending data to be written.
+func (tx *transaction) writePendingAndCommit() error {
+	// Save the current block store write position for potential rollback.
+	// These variables are only updated here in this function and there can
+	// only be one write transaction active at a time, so it's safe to store
+	// them for potential rollback.
+	wc := tx.db.store.writeCursor
+	wc.RLock()
+	oldBlkFileNum := wc.curFileNum
+	oldBlkOffset := wc.curOffset
+	wc.RUnlock()
+
+	// rollback is a closure that is used to rollback all writes to the block files.
+	rollback := func() {
+		tx.db.store.handleRollback(oldBlkFileNum, oldBlkOffset)
+	}
+
+	// Loop through all of the pending blocks to store and write them.
+	for _, blockData := range tx.pendingBlockData {
+		log.Tracef("Storing block %s", blockData.hash)
+		location, err := tx.db.store.writeBlock(blockData.bytes)
+		if err != nil {
+			rollback()
+			return err
+		}
+
+		// Add a record in the block index for the block. The record includes the location
+		// information needed to locate the block on the filesystem as well as the block
+		// header since they are so commonly needed.
+		blockRow := serializeBlockLoc(location)
+		err = tx.blockIdxBucket.Put(blockData.hash[:], blockRow)
+		if err != nil {
+			rollback()
+			return err
+		}
+	}
+
+	// Update the metadata for the current write file and offset
+	writeRow := serializeWriteRow(wc.curFileNum, wc.curOffset)
+	if err := tx.metaBucket.Put(writeLockKeyName, writeRow); err != nil {
+		rollback()
+		return convertErr("failed to store write cursor", err)
+	}
+
+	// Atomically update the database cache. The cache automatically
+	// handles flushing to the underlying persistent storage database.
+	return tx.db.cache.commitTx(tx)
+}
+
+// Commit commits all changes that have been made to the root metadata bucket
+// and all of its sub-buckets to the database cache which is periodically synced
+// to persistent storage. In addition, it commits all new blocks directly to
+// persistent storage bypassing the db cache. Blocks can be rather large, so
+// this help increase the amount of cache available for the metadata updates and
+// is safe since blocks are immutable.
 func (tx *transaction) Commit() error {
-	panic("implement me")
+	// Prevent commits on managed transactions.
+	if tx.managed {
+		tx.close()
+		panic("managed transaction commit not allowed")
+	}
+
+	// Ensure transaction state is valid.
+	if err := tx.checkClosed(); err != nil {
+		return err
+	}
+
+	// Regardless of whether the commit succeeds, the transaction is closed on return.
+	defer tx.close()
+
+	// Ensure the transaction is writeable
+	if !tx.writable {
+		str := "Commit requires a writable database transaction"
+		return makeDbErr(database.ErrTxNotWritable, str, nil)
+	}
+
+	// Write pending data. The function will rollback if any errors occur.
+	return tx.writePendingAndCommit()
+
 }
 
 func (tx *transaction) Rollback() error {

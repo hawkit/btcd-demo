@@ -370,7 +370,7 @@ type Tx interface {
 	// has ended results in undefined behavior.  This constraint prevents
 	// additional data copies and allows support for memory-mapped database
 	// implementations.
-	FetchBlockRegions(regions []*BlockRegion) ([][]byte, error)
+	FetchBlockRegions(regions []BlockRegion) ([][]byte, error)
 
 	// ******************************************************************
 	// Methods related to both atomic metadata storage and block storage.
