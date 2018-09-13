@@ -2,37 +2,6 @@
 
 
 [[projects]]
-  branch = "master"
-  digest = "1:e6b9b9d6ee6cdaa6ffb0aa5a8c078f7fc8242a0183d88fc79f29a6777fa530bf"
-  name = "github.com/btcsuite/btcd"
-  packages = [
-    "chaincfg/chainhash",
-    "wire",
-  ]
-  pruneopts = "UT"
-  revision = "cff30e1d23fc9e800b2b5b4b41ef1817dda07e9f"
-
-[[projects]]
-  digest = "1:cd7d6fb5b2ce7f7370434d883e538de5e56a6da10409a5d169001cb827f0303a"
-  name = "github.com/btcsuite/goleveldb"
-  packages = [
-    "leveldb/cache",
-    "leveldb/comparer",
-    "leveldb/errors",
-    "leveldb/filter",
-    "leveldb/iterator",
-    "leveldb/journal",
-    "leveldb/memdb",
-    "leveldb/opt",
-    "leveldb/storage",
-    "leveldb/table",
-    "leveldb/util",
-  ]
-  pruneopts = "UT"
-  revision = "3fd0373267b6461dbefe91cef614278064d05465"
-  version = "v1.0.0"
-
-[[projects]]
   digest = "1:f9bf7ab1aef6d501f1c51179e96d75a75526a85fd0f18bb2b285eaae058df084"
   name = "github.com/btcsuite/snappy-go"
   packages = ["."]
@@ -40,17 +9,6 @@
   revision = "b3db38edf0a9a11a115eb6b022d8c946024a9ac0"
   version = "v1.0.0"
 
-[[projects]]
-  branch = "database"
-  digest = "1:70db87459dd6ad022b71703cfb3503a5275e84cdaf0b8f4bb5581679631ff5d8"
-  name = "github.com/hawkit/btcd-demo"
-  packages = [
-    "chaincfg",
-    "chaincfg/chainhash",
-    "wire",
-  ]
-  pruneopts = "UT"
-  revision = "7d1e13b0a98b34d865f177970bf805e473dbdf6a"
 
 [[projects]]
   branch = "master"
