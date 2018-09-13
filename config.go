@@ -1,7 +1,6 @@
 package main
 
 import (
-	"btcd-demo/peer"
 	"bufio"
 	"crypto/rand"
 	"encoding/base64"
@@ -12,19 +11,23 @@ import (
 	"strings"
 	"time"
 
-	"btcd-demo/blockchain"
-	"btcd-demo/chaincfg/chainhash"
-	"btcd-demo/database"
-	"btcd-demo/mempool"
+	"github.com/hawkit/btcd-demo/chaincfg"
+	"github.com/hawkit/btcd-demo/peer"
+
 	"fmt"
 	"runtime"
 	"sort"
 	"strconv"
 
-	_ "btcd-demo/database/ffldb"
+	"github.com/hawkit/btcd-demo/blockchain"
+	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
+	"github.com/hawkit/btcd-demo/database"
+	"github.com/hawkit/btcd-demo/mempool"
 
-	"github.com/btcsuite/btcd/connmgr"
-	"github.com/hawkit/btcd-demo/chaincfg"
+	_ "github.com/hawkit/btcd-demo/database/ffldb"
+
+	"github.com/hawkit/btcd-demo/connmgr"
+
 	"github.com/hawkit/btcutil-demo"
 	"github.com/hawkit/go-socks/socks"
 	flags "github.com/jessevdk/go-flags"

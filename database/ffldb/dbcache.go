@@ -1,9 +1,10 @@
 package ffldb
 
 import (
-	"btcd-demo/database/internal/treap"
 	"sync"
 	"time"
+
+	"github.com/hawkit/btcd-demo/database/internal/treap"
 
 	"github.com/hawkit/goleveldb/leveldb"
 )

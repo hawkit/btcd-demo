@@ -1,10 +1,11 @@
 package chaincfg
 
 import (
-	"btcd-demo/chaincfg/chainhash"
-	"btcd-demo/wire"
 	"errors"
 	"strings"
+
+	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
+	"github.com/hawkit/btcd-demo/wire"
 )
 
 type Params struct {
@@ -77,6 +78,7 @@ var SimNetParams = Params{
 	// Mempool parameters
 	RelayNonStdTxs: true,
 }
+
 // IsBech32SegwitPrefix returns whether the prefix is a known prefix for segwit
 // addresses on any default or registered network. This is used when decoding
 // an address string into a specific address type

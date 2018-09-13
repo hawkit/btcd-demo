@@ -41,9 +41,6 @@
   branch = "master"
   name = "github.com/hawkit/btclog-demo"
 
-[[constraint]]
-  branch = "master"
-  name = "github.com/hawkit/goleveldb"
 
 
 [prune]

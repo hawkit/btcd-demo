@@ -1,7 +1,7 @@
 package main
 
 import (
-	"btcd-demo/wire"
+	"github.com/hawkit/btcd-demo/wire"
 
 	"github.com/hawkit/btcd-demo/chaincfg"
 )

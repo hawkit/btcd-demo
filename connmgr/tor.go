@@ -1,13 +1,10 @@
-// Copyright (c) 2013-2016 The btcsuite developers
-// Use of this source code is governed by an ISC
-// license that can be found in the LICENSE file.
-
 package connmgr
 
 import (
 	"encoding/binary"
-	"errors"
 	"net"
+
+	"github.com/pkg/errors"
 )
 
 const (
@@ -31,16 +28,13 @@ var (
 	// response in an unexpected format.
 	ErrTorInvalidProxyResponse = errors.New("invalid proxy response")
 
-	// ErrTorUnrecognizedAuthMethod indicates the authentication method
-	// provided is not recognized.
 	ErrTorUnrecognizedAuthMethod = errors.New("invalid proxy authentication method")
 
-	torStatusErrors = map[byte]error{
+	torStatusError = map[byte]error{
 		torSucceeded:         errors.New("tor succeeded"),
 		torGeneralError:      errors.New("tor general error"),
 		torNotAllowed:        errors.New("tor not allowed"),
 		torNetUnreachable:    errors.New("tor network is unreachable"),
-		torHostUnreachable:   errors.New("tor host is unreachable"),
 		torConnectionRefused: errors.New("tor connection refused"),
 		torTTLExpired:        errors.New("tor TTL expired"),
 		torCmdNotSupported:   errors.New("tor command not supported"),
@@ -83,7 +77,7 @@ func TorLookupIP(host, proxy string) ([]net.IP, error) {
 	buf[3] = 3      // Tor Resolve
 	buf[4] = byte(len(host))
 	copy(buf[5:], host)
-	buf[5+len(host)] = 0 // Port 0
+	buf[5+len(host)] = 0 // Port 0  1 bytes
 
 	_, err = conn.Write(buf)
 	if err != nil {
@@ -99,15 +93,16 @@ func TorLookupIP(host, proxy string) ([]net.IP, error) {
 		return nil, ErrTorInvalidProxyResponse
 	}
 	if buf[1] != 0 {
-		if int(buf[1]) >= len(torStatusErrors) {
+		if int(buf[1]) >= len(torStatusError) {
 			return nil, ErrTorInvalidProxyResponse
-		} else if err := torStatusErrors[buf[1]]; err != nil {
+		} else if err := torStatusError[buf[1]]; err != nil {
 			return nil, err
 		}
 		return nil, ErrTorInvalidProxyResponse
 	}
+
 	if buf[3] != 1 {
-		err := torStatusErrors[torGeneralError]
+		err := torStatusError[torGeneralError]
 		return nil, err
 	}
 
@@ -121,7 +116,6 @@ func TorLookupIP(host, proxy string) ([]net.IP, error) {
 	}
 
 	r := binary.BigEndian.Uint32(buf)
-
 	addr := make([]net.IP, 1)
 	addr[0] = net.IPv4(byte(r>>24), byte(r>>16), byte(r>>8), byte(r))
 

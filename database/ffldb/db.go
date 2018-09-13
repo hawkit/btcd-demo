@@ -1,17 +1,18 @@
 package ffldb
 
 import (
-	"btcd-demo/database"
-	"btcd-demo/wire"
 	"sync"
 
-	"btcd-demo/database/internal/treap"
+	"github.com/hawkit/btcd-demo/database"
+	"github.com/hawkit/btcd-demo/wire"
+
+	"github.com/hawkit/btcd-demo/database/internal/treap"
 
 	"fmt"
 
 	"encoding/binary"
 
-	"btcd-demo/chaincfg/chainhash"
+	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
 
 	"github.com/hawkit/btcutil-demo"
 	"github.com/hawkit/goleveldb/leveldb"

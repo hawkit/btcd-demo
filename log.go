@@ -1,10 +1,11 @@
 package main
 
 import (
-	"btcd-demo/database"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/hawkit/btcd-demo/database"
 
 	"github.com/hawkit/btclog-demo"
 	"github.com/jrick/logrotate/rotator"

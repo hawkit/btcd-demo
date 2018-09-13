@@ -3,24 +3,14 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:ed23b0fe22b8d34044a31853a7d497153c5dfb08332cb997e2b40b8a766ae901"
+  digest = "1:e6b9b9d6ee6cdaa6ffb0aa5a8c078f7fc8242a0183d88fc79f29a6777fa530bf"
   name = "github.com/btcsuite/btcd"
   packages = [
-    "chaincfg",
     "chaincfg/chainhash",
-    "connmgr",
     "wire",
   ]
   pruneopts = "UT"
   revision = "cff30e1d23fc9e800b2b5b4b41ef1817dda07e9f"
-
-[[projects]]
-  branch = "master"
-  digest = "1:30d4a548e09bca4a0c77317c58e7407e2a65c15325e944f9c08a7b7992f8a59e"
-  name = "github.com/btcsuite/btclog"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "84c8d2346e9fc8c7b947e243b9c24e6df9fd206a"
 
 [[projects]]
   digest = "1:cd7d6fb5b2ce7f7370434d883e538de5e56a6da10409a5d169001cb827f0303a"
@@ -125,10 +115,9 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
-    "github.com/btcsuite/btcd/connmgr",
-    "github.com/btcsuite/btcd/wire",
     "github.com/hawkit/btcd-demo/chaincfg",
     "github.com/hawkit/btcd-demo/chaincfg/chainhash",
+    "github.com/hawkit/btcd-demo/wire",
     "github.com/hawkit/btclog-demo",
     "github.com/hawkit/btcutil-demo",
     "github.com/hawkit/go-socks/socks",

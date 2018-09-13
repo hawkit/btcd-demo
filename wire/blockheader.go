@@ -4,11 +4,10 @@ import (
 	"io"
 	"time"
 
+	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
+	"github.com/hawkit/btcd-demo/wire"
+
 	"bytes"
-
-	"github.com/btcsuite/btcd/wire"
-
-	"btcd-demo/chaincfg/chainhash"
 )
 
 // MaxBlockHeaderPayload is the maximum block number of bytes a block header can be.

@@ -1,8 +1,6 @@
 package ffldb
 
 import (
-	"btcd-demo/database"
-	"btcd-demo/wire"
 	"container/list"
 	"encoding/binary"
 	"fmt"
@@ -11,6 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/hawkit/btcd-demo/database"
+	"github.com/hawkit/btcd-demo/wire"
 
 	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
 )

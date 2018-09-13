@@ -3,7 +3,7 @@ package wire
 import (
 	"io"
 
-	"btcd-demo/chaincfg/chainhash"
+	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
 )
 
 type MsgBlock struct {

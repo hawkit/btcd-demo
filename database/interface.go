@@ -1,7 +1,7 @@
 package database
 
 import (
-	"btcd-demo/chaincfg/chainhash"
+	"github.com/hawkit/btcd-demo/chaincfg/chainhash"
 
 	"github.com/hawkit/btcutil-demo"
 )
