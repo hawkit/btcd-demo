@@ -10,6 +10,16 @@ import (
 	"github.com/hawkit/goleveldb/leveldb"
 )
 
+const (
+	// defaultCacheSize is the default size for the database cache.
+	defaultCacheSize = 100 * 1024 * 1024 // 100 MB
+
+	// defaultFlushSecs is the default number of seconds to use as a
+	// threshold in between database cache flushes when the cache size
+	// has not been exceeded.
+	defaultFlushSecs = 300 // 5 minutes
+)
+
 // dbCacheSnapshot defines a snapshot of the database cache and underlying
 // database at a particular point in time.
 type dbCacheSnapshot struct {
@@ -114,7 +124,7 @@ func (c *dbCache) Snapshot() (*dbCacheSnapshot, error) {
 		pendingKeys:   c.cachedKeys,
 		pendingRemove: c.cachedRemove,
 	}
-	c.cacheLock.Unlock()
+	c.cacheLock.RUnlock()
 	return cacheSnapshot, nil
 }
 
@@ -319,4 +329,41 @@ func (c *dbCache) commitTx(tx *transaction) error {
 
 	return nil
 
+}
+
+// Close cleanly shuts down the database cache by syncing all data and closing
+// the underlying leveldb database
+//
+// This function MUST be called with the database write lock held.
+func (c *dbCache) Close() error {
+	// Flush any outstanding cached entries to disk.
+	if err := c.flush(); err != nil {
+		// Even if there is an error while flushing, attempt to close
+		// the underlying database.  The error is ignored since it would
+		// mask the flush error.
+		_ = c.ldb.Close()
+		return err
+	}
+
+	// Close the underlying leveldb database
+	if err := c.ldb.Close(); err != nil {
+		str := "failed to close underlying leveldb database"
+		return convertErr(str, err)
+	}
+	return nil
+}
+
+// newDbCache returns a new database cache instance backed by the provided leveldb
+// instance. The cache will be flushed to leveldb when the max size exceeds the
+// provided value or it has been longer than the provided interval since the last flush.
+func newDbCache(ldb *leveldb.DB, store *blockStore, maxSize uint64, flushIntervalSecs uint32) *dbCache {
+	return &dbCache{
+		ldb:           ldb,
+		store:         store,
+		maxSize:       maxSize,
+		flushInterval: time.Second * time.Duration(flushIntervalSecs),
+		lastFlush:     time.Now(),
+		cachedKeys:    treap.NewImmutable(),
+		cachedRemove:  treap.NewImmutable(),
+	}
 }

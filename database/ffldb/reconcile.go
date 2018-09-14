@@ -40,3 +40,64 @@ func deserializeWriteRow(writeRow []byte) (uint32, uint32, error) {
 	fileOffset := byteOrder.Uint32(writeRow[4:8])
 	return fileNum, fileOffset, nil
 }
+
+// reconcileDB reconciles the metadata with the flat block files on disk. It
+// will also initialize the underlying database if the create flag is set.
+func reconcileDB(pdb *db, create bool) (database.DB, error) {
+	// Perform initial internal bucket and value creation during database creation.
+	if create {
+		if err := initDB(pdb.cache.ldb); err != nil {
+			return nil, err
+		}
+	}
+
+	// Load the current write cursor position from the metadata.
+	var curFileNum, curOffset uint32
+	err := pdb.View(func(tx database.Tx) error {
+		writeRow := tx.Metadata().Get(writeLockKeyName)
+		if writeRow == nil {
+			str := "write cursor dose not exist"
+			return makeDbErr(database.ErrCorruption, str, nil)
+		}
+
+		var err error
+		curFileNum, curOffset, err = deserializeWriteRow(writeRow)
+		return err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// When the write cursor position found by scanning the block files on
+	// disk is AFTER the position the metadata believes to be true, truncate
+	// the files on disk to match the metadata. This can be fairly common
+	// occurrence in unclean shutdown scenarios while the metadata isn't updated
+	// until after the block data is written, this is effectively just a rollback
+	// to the known good point before the unclean shutdown.
+	wc := pdb.store.writeCursor
+	if wc.curFileNum > curFileNum || (wc.curFileNum == curFileNum &&
+		wc.curOffset > curOffset) {
+		log.Info("Detected unclean shutdown - repairing...")
+		log.Debugf("Metadata claims file %d, offset %d. Block data is "+
+			"at file %d, offset %d", curFileNum, curOffset, wc.curFileNum, wc.curOffset)
+		pdb.store.handleRollback(curFileNum, curOffset)
+		log.Infof("Database sync complete")
+	}
+
+	// When the write cursor position found by scanning the block files on disk is BEFORE
+	// the position the metadata believes to be true, return a corruption error. Since sync
+	// is called after each block is written and before the metadata is updated, this should
+	// only happen in the case of missing, deleted or corrupted block files, which generally
+	// is not an easily recoverable scenario. In the future, it might be possible to rescan
+	// and rebuild the metadata from the block files, however, that would need to happen with
+	// coordination from a higher layer since it could invalidate other metadata.
+	if wc.curFileNum < curFileNum || (wc.curFileNum == curFileNum &&
+		wc.curOffset < curOffset) {
+		str := fmt.Sprintf("metadata claims file %d, offset %d, but "+
+			"block data is at file %d, offset %d", curFileNum, curOffset, wc.curFileNum, wc.curOffset)
+		log.Warnf("***Database corruption detected***: %v", str)
+		return nil, makeDbErr(database.ErrCorruption, str, nil)
+	}
+	return pdb, nil
+}

@@ -1,8 +1,13 @@
 package ffldb
 
 import (
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/hawkit/goleveldb/leveldb/filter"
+	"github.com/hawkit/goleveldb/leveldb/opt"
 
 	"github.com/hawkit/btcd-demo/database"
 	"github.com/hawkit/btcd-demo/wire"
@@ -21,6 +26,10 @@ import (
 )
 
 const (
+
+	// metadataDbName is the name used for the metadata database.
+	metadataDbName = "metadata"
+
 	// blockHdrSize is the size of a block header. This is simply the
 	// constant from wire and is only provided here for convenience since
 	// wire.MaxBlockHeaderPayload is quite long
@@ -59,6 +68,10 @@ var (
 	// blockIdxBucketID is the ID of the internal block metadata bucket.
 	// It is the value 1 encoded as an unsigned big-endian uint32
 	blockIdxBucketID = [4]byte{0x00, 0x00, 0x00, 0x01}
+
+	// blockIdxBucketName  is the bucket used internally to track block
+	// metadata
+	blockIdxBucketName = []byte("ffldb-blockidx")
 
 	// writeLocKeyName is the key used to store the current write file
 	// location.
@@ -888,8 +901,24 @@ func (tx *transaction) Commit() error {
 
 }
 
+// Rollback undoes all changes that have been made to the root bucket and all
+// of its sub-buckets
+//
+// This function is part of the database.Tx interface implementation.
 func (tx *transaction) Rollback() error {
-	panic("implement me")
+	// Prevent rollbacks on managed transactions.
+	if tx.managed {
+		tx.close()
+		panic("managed transaction rollback not allowed")
+	}
+
+	// Ensure transaction state is valid.
+	if err := tx.checkClosed(); err != nil {
+		return err
+	}
+
+	tx.close()
+	return nil
 }
 
 // db represents a collection of namespaces which are persisted and implements
@@ -974,20 +1003,207 @@ func (db *db) Begin(writable bool) (database.Tx, error) {
 	return db.begin(writable)
 }
 
+// Close cleanly shuts down the database and syncs all data. It will block
+// until all database transactions have been finalized (roll back or committed)
+//
+// This function is part of the database.DB interface implementation.
 func (db *db) Close() error {
-	panic("implement me")
+	// Since all transactions have a read lock on this mutex, this will
+	// cause Close to wait for all readers to complete.
+	db.closeLock.Lock()
+	defer db.closeLock.Unlock()
+
+	if db.closed {
+		return makeDbErr(database.ErrDbNotOpen, ErrDbNotOpenStr, nil)
+	}
+	db.closed = true
+
+	// NOTE: Since the above lock waits for all transactions to finish and
+	// prevents any new ones from being started, it is safe to flush the
+	// cache and clear all state without the individual locks.
+
+	// Close the database cache which will flush any existing entries to
+	// disk and close the underlying leveldb database.  Any error is saved
+	// and returned at the end after the remaining cleanup since the
+	// database will be marked closed even if this fails given there is no
+	// good way for the caller to recover from a failure here anyways.
+	closeErr := db.cache.Close()
+
+	// Close any open flat files that house the blocks.
+	wc := db.store.writeCursor
+	if wc.curFile.file != nil {
+		_ = wc.curFile.file.Close()
+		wc.curFile.file = nil
+	}
+
+	for _, blockFile := range db.store.openBlockFiles {
+		_ = blockFile.file.Close()
+	}
+
+	db.store.openBlockFiles = nil
+	db.store.openBlocksLRU.Init()
+	db.store.fileNumToLRUElem = nil
+
+	return closeErr
+
 }
 
+// Update invokes the passed function in the context of a managed read-write
+// transaction with the root bucket for the namespace. Any errors returned from
+// the user-supplied function will cause the transaction to be rolled back and
+// are returned from this function. Otherwise, the transaction is committed
+// when the user-supplied function returns a nil error.
+//
+// This function is part of the database.DB interface implementation.
 func (db *db) Update(fn func(tx database.Tx) error) error {
-	panic("implement me")
+	// Start a read-write transaction.
+	tx, err := db.begin(true)
+	if err != nil {
+		return err
+	}
+
+	// Since the user-provided function might panic, ensure the transaction
+	// releases all mutexes and resources. There is no guarantee the caller
+	// won't use recover and keep going. Thus, the database must still be in
+	// usable state on panics due to caller issues.
+	defer rollbackOnPanic(tx)
+
+	tx.managed = true
+	err = fn(tx)
+	tx.managed = false
+
+	if err != nil {
+		// The error is ignored here because nothing was written yet
+		// and regardless of a rollback failure, the tx is closed now
+		// anyways.
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
+// rollbackOnPanic rolls the passed transaction back if the code in the calling
+// function panics. This is needed since the mutex on a transaction must be
+// released and a panic in called code would prevent that from happening.
+//
+// NOTE: This is only be handled manually for managed transactions since they
+// control the life-cycle of the transaction. As the documentation on Begin
+// calls out, callers opting to use manual transaction will have to ensure the
+// transaction is rolled back on panic if it desires that functionality as well
+// or the database will fail to close since the read-lock will never be released.
+func rollbackOnPanic(tx *transaction) {
+	if err := recover(); err != nil {
+		tx.managed = false
+		_ = tx.Rollback()
+		panic(err)
+	}
+}
+
+// View invokes the passed function in the context of a managed read-only
+// transaction with the root bucket for the namespace. Any errors returned
+// from the user-supplied function are returned from this function.
+//
+// This function is part of the database.DB interface implementation.
 func (db *db) View(fn func(tx database.Tx) error) error {
-	panic("implement me")
+	// Start a read-only transaction.
+	tx, err := db.begin(false)
+	if err != nil {
+		return err
+	}
+
+	// Since the user-supplied function might panic, ensure the transaction
+	// releases all mutexes and resources. There is no guarantee the caller
+	// won't use recover and keep going. Thus, the database must still be
+	// in a usable state on panics due to caller issues.
+	defer rollbackOnPanic(tx)
+
+	tx.managed = true
+	err = fn(tx)
+	if err != nil {
+		// The error is ignored here because nothing was written yet
+		// and regardless of a rollback failure, the tx is closed now
+		// anyways.
+		_ = tx.Rollback()
+		return err
+	}
+
+	return tx.Rollback()
+}
+
+func fileExists(name string) bool {
+	if _, err := os.Stat(name); err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+	}
+	return true
+}
+
+// initDB creates the initial buckets and values used by the package. This is
+// mainly in a separate function for testing purpose.
+func initDB(ldb *leveldb.DB) error {
+	// The starting block file write cursor location is file num 0, offset 0
+	batch := new(leveldb.Batch)
+	batch.Put(bucketizedKey(metadataBucketID, writeLockKeyName), serializeWriteRow(0, 0))
+
+	// Create block index bucket and set the current bucket id.
+	//
+	// NOTE: Since buckets are virtualized through the use of prefixes,
+	// there is no need to store the bucket index data for the metadata
+	// bucket in the database. However, the first bucket ID to use dose
+	// need to account for it to ensure there are no key collisions.
+	batch.Put(bucketizedKey(metadataBucketID, blockIdxBucketName), blockIdxBucketID[:])
+	batch.Put(curBucketIDKeyName, blockIdxBucketID[:])
+
+	// Write everything as a single batch.
+	if err := ldb.Write(batch, nil); err != nil {
+		str := fmt.Sprintf("failed to initialize metadata database: %v ", err)
+		return convertErr(str, err)
+	}
+	return nil
 }
 
 // openDB opens the database at the provided path.  database.ErrDbDoesNotExist
 // is returned if the database doesn't exist and the create flag is not set.
 func openDB(dbPath string, network wire.BitcoinNet, create bool) (database.DB, error) {
-	return nil, nil // todo opendb
+	// Error if the database dosen't exist and the create flag is not set
+	metadataDbPath := filepath.Join(dbPath, metadataDbName)
+	dbExists := fileExists(metadataDbPath)
+	if !create && !dbExists {
+		str := fmt.Sprintf("database %q dose not exist", metadataDbPath)
+		return nil, makeDbErr(database.ErrDbDoesNotExist, str, nil)
+	}
+
+	// Ensure the full path to the database exists.
+	if !dbExists {
+		// The error can be ignored here since the call to
+		// leveldb.OpenFile will fail if the directory couldn't
+		// be created.
+		_ = os.MkdirAll(metadataDbPath, 0700)
+	}
+
+	// Open the metadata database (will create it if needed.)
+	opts := opt.Options{
+		ErrorIfExist: create,
+		Strict:       opt.DefaultStrict,
+		Compression:  opt.NoCompression,
+		Filter:       filter.NewBloomFilter(10),
+	}
+	ldb, err := leveldb.OpenFile(metadataDbPath, &opts)
+	if err != nil {
+		return nil, convertErr(err.Error(), err)
+	}
+
+	// Create the block store which includes scanning the existing flat
+	// block files to find what the current write cursor position is
+	// according to the data that is actually on disk. Also create the
+	// database cache which wraps the underlying leveldb database to provide
+	// write caching.
+	store := newBlockStore(dbPath, network)
+	cache := newDbCache(ldb, store, defaultCacheSize, defaultFlushSecs)
+	pdb := &db{store: store, cache: cache}
+
+	// Perform nay reconciliation needed bewteen the block and metadata as
+	// well as database initialization, if needed.
+	return reconcileDB(pdb, create)
 }
