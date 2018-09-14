@@ -1,10 +1,17 @@
 package ffldb
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/hawkit/goleveldb/leveldb/comparer"
+
+	"github.com/hawkit/goleveldb/leveldb/util"
+
+	"github.com/hawkit/goleveldb/leveldb/iterator"
 
 	"github.com/hawkit/goleveldb/leveldb/filter"
 	"github.com/hawkit/goleveldb/leveldb/opt"
@@ -135,12 +142,397 @@ func convertErr(desc string, ldbErr error) database.Error {
 	return database.Error{ErrorCode: code, Description: desc, Err: ldbErr}
 }
 
+// copySlice returns a copy of the passed slice. This is mostly used to copy
+// leveldb iterator keys and values since they are only valid until the iterator
+// is moved instead of during the entirety of the transaction.
+func copySlice(slice []byte) []byte {
+	ret := make([]byte, len(slice))
+	copy(ret, slice)
+	return ret
+}
+
+// cursor is an internal type used to represent a cursor over key/value pairs
+// and nested buckets of a bucket and implements the database.Cursor interface.
+type cursor struct {
+	bucket      *bucket
+	dbIter      iterator.Iterator
+	pendingIter iterator.Iterator
+	currentIter iterator.Iterator
+}
+
+// Bucket returns the bucket the cursor was created for.
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) Bucket() database.Bucket {
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return nil
+	}
+	return c.bucket
+}
+
+// Delete removes the current key/value pair the cursor is at without
+// invalidating the cursor.
+//
+// Returns the following errors as required by the interface contract:
+//   - ErrIncompatibleValue if attempted when the cursor points to a nested
+//     bucket
+//   - ErrTxNotWritable if attempted against a read-only transaction
+//   - ErrTxClosed if the transaction has already been closed
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) Delete() error {
+	// Ensure transaction state is valid.
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return err
+	}
+	// Error if the cursor is exhausted
+	if c.currentIter == nil {
+		str := "cursor is exhausted"
+		return makeDbErr(database.ErrIncompatibleValue, str, nil)
+	}
+
+	// Do not allow buckets to be deleted via the cursor.
+	key := c.currentIter.Key()
+	if bytes.HasPrefix(key, bucketIndexPrefix) {
+		str := "buckets may not be deleted from a cursor"
+		return makeDbErr(database.ErrIncompatibleValue, str, nil)
+	}
+
+	c.bucket.tx.deleteKey(copySlice(key), true)
+	return nil
+}
+
+// skipPendingUpdates skips any keys at the current database iterator position
+// that are being updated by the transaction.  The forwards flag indicates the
+// direction the cursor is moving.
+func (c *cursor) skipPendingUpdates(forwards bool) {
+
+	for c.dbIter.Valid() {
+		var skip bool
+		key := c.dbIter.Key()
+		if c.bucket.tx.pendingRemove.Has(key) {
+			skip = true
+		} else if c.bucket.tx.pendingKeys.Has(key) {
+			skip = true
+		}
+		if !skip {
+			break
+		}
+
+		if forwards {
+			c.dbIter.Next()
+		} else {
+			c.dbIter.Prev()
+		}
+	}
+}
+
+// chooseIterator first skips any entries in the database iterator that
+// are being updated by the transaction and sets the current iterator to
+// the appropriate iterator depending on their validity and the order they
+// compare in while taking into account the direction flag. When the cursor
+// is being moved forwards and both iterators are valid, the iterator with
+// the smaller key is chosen an vice versa when the cursor is being moved
+// backwards.
+func (c *cursor) chooseIterator(forwards bool) bool {
+	// Skip any keys at the current database iterator position that are
+	// being updated by the transaction.
+	c.skipPendingUpdates(forwards)
+
+	// when both cursors are exhausted, the cursor is exhausted too.
+	if !c.dbIter.Valid() && !c.pendingIter.Valid() {
+		c.currentIter = nil
+		return false
+	}
+
+	// Choose the database iterator when the pending keys iterator is
+	// exhausted.
+	if !c.pendingIter.Valid() {
+		c.currentIter = c.dbIter
+		return true
+	}
+
+	// Choose the pending keys iterator when the database iterator is
+	// exhausted.
+	if !c.dbIter.Valid() {
+		c.currentIter = c.pendingIter
+		return true
+	}
+
+	// Both iterators are valid, so choose the iterator with either the
+	// smaller or larger key depending on the forwards flag.
+	compare := bytes.Compare(c.dbIter.Key(), c.pendingIter.Key())
+	if (forwards && compare > 0) || (!forwards && compare < 0) {
+		c.currentIter = c.pendingIter
+	} else {
+		c.currentIter = c.dbIter
+	}
+	return true
+}
+
+// First positions the cursor at the first key/value pair and returns whether or
+// not the pair exist.
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) First() bool {
+	// Ensure transaction state is valid.
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return false
+	}
+
+	// Seek to the first key in both the database and pending iterators and
+	// choose the iterator that is both valid and has the smaller key.
+	c.dbIter.First()
+	c.pendingIter.First()
+	return c.chooseIterator(true)
+}
+
+// Last positions the cursor at the last key/value pair and returns whether or
+// not the pair exists.
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) Last() bool {
+	// Ensure transaction state is valid.
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return false
+	}
+
+	// Seek to the last key in both the database and pending iterators and
+	// choose the iterator that is both valid and has the larger key.
+	c.dbIter.Last()
+	c.pendingIter.Last()
+	return c.chooseIterator(false)
+}
+
+// Next moves the cursor one key/value pair forward and returns whether or not
+// the pair exists.
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) Next() bool {
+	// Ensure transaction state is valid.
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return false
+	}
+
+	// Nothing to return if cursor is exhausted.
+	if c.currentIter == nil {
+		return false
+	}
+
+	// Move the current iterator to the next entry and choose the iterator
+	// that is both valid and has the smaller key.
+	c.currentIter.Next()
+	return c.chooseIterator(true)
+
+}
+
+// Prev moves the cursor one key/value pair backward and returns whether or not
+// the pair exists.
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) Prev() bool {
+	// Ensure transaction state is valid.
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return false
+	}
+	// Nothing to return if cursor is exhausted.
+	if c.currentIter == nil {
+		return false
+	}
+	// Move the current iterator to the previous entry and choose the iterator
+	// that is both valid and has the smaller key.
+	c.currentIter.Prev()
+	return c.chooseIterator(false)
+}
+
+// Seek positions the cursor at the first key/value pair that is greater than or
+// equal to the passed seek key. Returns false if no suitable key was found.
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) Seek(seek []byte) bool {
+	// Ensure transaction state is valid.
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return false
+	}
+
+	// Seek to the provided key in both the database and pending iterators
+	// then choose the iterator that is both valid and has the larger key.
+	seekKey := bucketizedKey(c.bucket.id, seek)
+	c.dbIter.Seek(seekKey)
+	c.pendingIter.Seek(seekKey)
+	return c.chooseIterator(true)
+}
+
+// Key returns the current key the cursor is pointing to.
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) Key() []byte {
+	// Ensure transaction state is valid.
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return nil
+	}
+
+	// Nothing to return if cursor is exhausted.
+	if c.currentIter == nil {
+		return nil
+	}
+
+	// Slice out the actual key name and make a copy since it is no longer
+	// valid after iterating to the next item.
+	//
+	// The key is after the bucket index prefix and parent ID when the
+	// cursor is pointing to a nested bucket.
+	key := c.currentIter.Key()
+	if bytes.HasPrefix(key, bucketIndexPrefix) {
+		key = key[len(bucketIndexPrefix)+4:]
+		return copySlice(key)
+	}
+
+	// The key is after the bucketID when the cursor is pointing to a
+	// normal entry.
+	key = key[len(c.bucket.id):]
+	return copySlice(key)
+}
+
+// Value returns the current value the cursor is pointing to. This will be nil
+// for nested buckets.
+//
+// This function is part of the database.Cursor interface implementation.
+func (c *cursor) Value() []byte {
+	// Ensure transaction state is valid.
+	if err := c.bucket.tx.checkClosed(); err != nil {
+		return nil
+	}
+
+	// Nothing to return if cursor is exhausted.
+	if c.currentIter == nil {
+		return nil
+	}
+
+	// Return nil for the value when the cursor is pointing to a nested
+	// bucket
+	if bytes.HasPrefix(c.currentIter.Key(), bucketIndexPrefix) {
+		return nil
+	}
+	return copySlice(c.currentIter.Value())
+}
+
+// rawKey returns the current key the cursor is pointing to without
+// stripping without filtering bucket index values.
+func (c *cursor) rawKey() []byte {
+	if c.currentIter == nil {
+		return nil
+	}
+	return copySlice(c.currentIter.Key())
+}
+
+// rawValue returns the current value the cursor is pointing to without
+// stripping without filtering bucket index values.
+func (c *cursor) rawValue() []byte {
+	if c.currentIter == nil {
+		return nil
+	}
+	return copySlice(c.currentIter.Value())
+}
+
+// Enforce cursor implements the database.Cursor interface.
+var _ database.Cursor = (*cursor)(nil)
+
+// cursoryType defines the type of cursor to create
+type cursorType int
+
+// The following constants define the allowed cursor types.
+const (
+	// ctKeys iterates through all of the keys in a given bucket.
+	ctKeys cursorType = iota
+
+	// ctBuckets iterates through all directly nested buckets in a given
+	// bucket
+	ctBuckets
+
+	// ctFull iterates through both the keys and the directly nested buckets
+	// in a given bucket.
+	ctFull
+)
+
+// cursorFinalizer is either invoked when a cursor is being garbage collected or
+// called manually to ensure the underlying cursor iterators are released.
+func cursorFinalizer(c *cursor) {
+	c.dbIter.Release()
+	c.pendingIter.Release()
+}
+
+// newCursor returns a new cursor for the given bucket, bucket ID, and cursor
+// type.
+//
+// NOTE: The caller is responsible for calling the cursorFinalizer function on
+// the returned cursor.
+func newCursor(b *bucket, bucketID []byte, cursorTyp cursorType) *cursor {
+	var dbIter, pendingIter iterator.Iterator
+	switch cursorTyp {
+	case ctKeys:
+		keyRange := util.BytesPrefix(bucketID)
+		dbIter = b.tx.snapshot.NewIterator(keyRange)
+		pendingKeyIter := newLdbTreapIter(b.tx, keyRange)
+		pendingIter = pendingKeyIter
+	case ctBuckets:
+		// The serialized bucket index key format is:
+		// <bucketindexprefix><parentbucketid><bucketname>
+		//
+		// Create an iterator for the both the database and the pending
+		// keys which are prefixed by the bucket index identifier and
+		// the provided bucket ID.
+		prefix := make([]byte, len(bucketIndexPrefix)+4)
+		copy(prefix, bucketIndexPrefix)
+		copy(prefix[len(bucketIndexPrefix):], bucketID)
+		bucketRange := util.BytesPrefix(prefix)
+
+		dbIter = b.tx.snapshot.NewIterator(bucketRange)
+		pendingBucketIter := newLdbTreapIter(b.tx, bucketRange)
+		pendingIter = pendingBucketIter
+	case ctFull:
+		fallthrough
+	default:
+		// The serialized bucket index key format is:
+		// <bucketindexprefix><parentbucketid><bucketname>
+		prefix := make([]byte, len(bucketIndexPrefix)+4)
+		copy(prefix, bucketIndexPrefix)
+		copy(prefix[len(bucketIndexPrefix):], bucketID)
+		bucketRange := util.BytesPrefix(prefix)
+		keyRange := util.BytesPrefix(bucketID)
+
+		// Since both keys and buckets are needed from the database,
+		// create an individual iterator for each prefix and then create
+		// a merged iterator from them.
+		dbKeyIter := b.tx.snapshot.NewIterator(keyRange)
+		dbBucketIter := b.tx.snapshot.NewIterator(bucketRange)
+		iters := []iterator.Iterator{dbKeyIter, dbBucketIter}
+		dbIter = iterator.NewMergedIterator(iters, comparer.DefaultComparer, true)
+
+		// Since both keys and buckets are needed from the pending keys,
+		// create an individual iterator for each prefix and then create
+		// a merged iterator from them.
+		pendingKeyIter := newLdbTreapIter(b.tx, keyRange)
+		pendingBucketIter := newLdbTreapIter(b.tx, bucketRange)
+		iters = []iterator.Iterator{pendingKeyIter, pendingBucketIter}
+		pendingIter = iterator.NewMergedIterator(iters, comparer.DefaultComparer, true)
+	}
+	return &cursor{
+		bucket:      b,
+		dbIter:      dbIter,
+		pendingIter: pendingIter,
+	}
+}
+
 // bucket is an internal type used to represent a collection of key/value pairs
 // and implements the database.Bucket interface.
 type bucket struct {
 	tx *transaction
 	id [4]byte
 }
+
+// Enforce bucket implements the database.Bucket interface
+var _ database.Bucket = (*bucket)(nil)
 
 // bucketIndexKey returns the actual key to use for storing and retrieving
 // a child bucket in the bucket index. This is required because additional
@@ -167,48 +559,339 @@ func bucketizedKey(bucketID [4]byte, key []byte) []byte {
 	return bKey
 }
 
+// Bucket retrieves a nested bucket with the given key. Returns nil if
+// the bucket dose not exist.
+//
+// This function is a part of the database.Bucket interface implementation
 func (b *bucket) Bucket(key []byte) database.Bucket {
-	panic("implement me")
+	// Ensure transaction state is valid
+	if err := b.tx.checkClosed(); err != nil {
+		return nil
+	}
+	// Attemp to fetch the ID for the child bucket. The bucket dose not
+	// exist if the bucket index entry dose not exist.
+	childID := b.tx.fetchKey(bucketIndexKey(b.id, key))
+	if childID == nil {
+		return nil
+	}
+
+	childBucket := &bucket{tx: b.tx}
+	copy(childBucket.id[:], childID)
+	return childBucket
 }
 
+// CreateBucket creates and returns a new nested bucket with the given key.
+//
+// Returns the following errors as required by the interface contract:
+// - ErrBucketExists if the bucket already exist
+// - ErrBucketNameRequired if the key is empty
+// - ErrIncompatibleValue if the key is otherwise invalid for the particular
+//   implementation
+// - ErrTxNotWritable if attempted against a read-only transaction
+// - ErrTxClosed if the transaction has already been closed
+//
+// This function is a part of the database.Bucket interface implementation.
 func (b *bucket) CreateBucket(key []byte) (database.Bucket, error) {
-	panic("implement me")
+	// Ensure transaction state is valid
+	if err := b.tx.checkClosed(); err != nil {
+		return nil, err
+	}
+	// Ensure the transaction is writable
+	if !b.tx.writable {
+		str := "create bucket requires a writable database transaction"
+		return nil, makeDbErr(database.ErrTxNotWritable, str, nil)
+	}
+
+	// Ensure a key was provided
+	if len(key) == 0 {
+		str := "create bucket requires a key"
+		return nil, makeDbErr(database.ErrBucketNameRequired, str, nil)
+	}
+
+	// Ensure bucket dose not already exist.
+	bidxKey := bucketIndexKey(b.id, key)
+	if b.tx.hasKey(bidxKey) {
+		str := "bucket already exists"
+		return nil, makeDbErr(database.ErrBucketExists, str, nil)
+	}
+
+	// Find the appropriate next bucket ID to use for the new bucket. In
+	// the case of the special internal block index, keep the fixed ID.
+	var childID [4]byte
+	if b.id == metadataBucketID && bytes.Equal(key, blockIdxBucketName) {
+		childID = blockIdxBucketID
+	} else {
+		var err error
+		childID, err = b.tx.nextBucketID()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Add the new bucket to the bucket index.
+	if err := b.tx.putKey(bidxKey, childID[:]); err != nil {
+		str := fmt.Sprintf("failed to create bucket with key %q", key)
+		return nil, convertErr(str, err)
+	}
+	return &bucket{tx: b.tx, id: childID}, nil
 }
 
+// CreateBucketIfNotExists creates and returns a new nested bucket with the
+// given key if it does not already exist.
+//
+// Returns the following errors as required by the interface contract:
+//   - ErrBucketNameRequired if the key is empty
+//   - ErrIncompatibleValue if the key is otherwise invalid for the particular
+//     implementation
+//   - ErrTxNotWritable if attempted against a read-only transaction
+//   - ErrTxClosed if the transaction has already been closed
+//
+// This function is part of the database.Bucket interface implementation.
 func (b *bucket) CreateBucketIfNotExists(key []byte) (database.Bucket, error) {
-	panic("implement me")
+	// Ensure transaction state is valid.
+	if err := b.tx.checkClosed(); err != nil {
+		return nil, err
+	}
+	// Ensure the transaction is writable.
+	if !b.tx.writable {
+		str := "create bucket requires a writable database transaction"
+		return nil, makeDbErr(database.ErrTxNotWritable, str, nil)
+	}
+	// Return existing bucket if it already exists, otherwise create it
+	if bucket := b.Bucket(key); bucket != nil {
+		return bucket, nil
+	}
+
+	return b.CreateBucket(key)
+
 }
 
+// DeleteBucket removes a nested bucket with the given key.
+//
+// Returns the following errors as required by the interface contract:
+// - ErrBucketNotFound if the specified bucket dose not exist
+// - ErrTxNotWritable if attempted against a read-only transaction
+// - ErrTxClosed if the transaction has already been closed
+// This function is a part of the database.Bucket interface implementation.
 func (b *bucket) DeleteBucket(key []byte) error {
-	panic("implement me")
+	// Ensure transaction state is valid.
+	if err := b.tx.checkClosed(); err != nil {
+		return err
+	}
+
+	// Ensure the transaction is writable
+	if !b.tx.writable {
+		str := "delete bucket requires a writable database transaction"
+		return makeDbErr(database.ErrTxNotWritable, str, nil)
+	}
+
+	// Attempt to fetch the ID for the child bucket. The bucket dose not
+	// exist if the bucket index entry dose not exist. In the case of the
+	// special internal block index, keep the fixed ID.
+	bidxKey := bucketIndexKey(b.id, key)
+	childID := b.tx.fetchKey(bidxKey)
+	if childID == nil {
+		str := fmt.Sprintf("bucket %q does not exist", key)
+		return makeDbErr(database.ErrBucketNotFound, str, nil)
+	}
+
+	// Remove all nested buckets and their keys
+	childIDs := [][]byte{childID}
+	for len(childIDs) > 0 {
+		childID = childIDs[len(childIDs)-1]
+		childIDs = childIDs[:len(childIDs)-1]
+
+		// Delete all keys in the nested bucket.
+		keyCursor := newCursor(b, childID, ctKeys)
+		for ok := keyCursor.First(); ok; ok = keyCursor.Next() {
+			b.tx.deleteKey(keyCursor.rawKey(), false)
+		}
+		cursorFinalizer(keyCursor)
+
+		// Iterate through all nested buckets
+		bucketCursor := newCursor(b, childID, ctBuckets)
+		for ok := bucketCursor.First(); ok; ok = bucketCursor.Next() {
+			// Push the id of the nested bucket onto the stack for
+			// the next iteration.
+			childID := bucketCursor.rawValue()
+			childIDs = append(childIDs, childID)
+
+			// Remove the nested bucket from the bucket index.
+			b.tx.deleteKey(bucketCursor.rawKey(), false)
+		}
+		cursorFinalizer(bucketCursor)
+	}
+
+	// Remove the nested bucket from the bucket index. Any buckets nested
+	// under it were already removed above.
+	b.tx.deleteKey(bidxKey, true)
+	return nil
 }
 
-func (b *bucket) ForEach(func(k, v []byte) error) error {
-	panic("implement me")
+// ForEach invokes the passed function with every key/value pair in the bucket.
+// This dose not include nested buckets or the key/value pairs within those
+// nested buckets.
+//
+// WARNING: It is not safe to mutate data while iterating with this method.
+// Doing so may cause the underlying cursor to be invalidated and return
+// unexpected keys and/or values.
+//
+// Returns the following errors as required by the interface contract:
+// - ErrTxClosed if the transaction has already been closed.
+//
+// NOTE: The values returned by this function are only valid during a
+// transaction. Attempting to access them after a transaction has ended will
+// likely result in an access violation.
+//
+// This function is part of the database.Bucket interface implementation.
+func (b *bucket) ForEach(fn func(k, v []byte) error) error {
+	// Ensure transaction state is valid
+	if err := b.tx.checkClosed(); err != nil {
+		return err
+	}
+
+	// Invoke the callback for each cursor item. Return the error returned
+	// from the callback when it is non-nil
+	c := newCursor(b, b.id[:], ctKeys)
+	defer cursorFinalizer(c)
+
+	for ok := c.First(); ok; ok = c.Next() {
+		err := fn(c.Key(), c.Value())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (b *bucket) ForEachBucket(func(k []byte) error) error {
-	panic("implement me")
+// ForEachBucket invokes the passed function with the key of every nested bucket
+// in the current bucket. This dose not include any nested buckets within those
+// nested buckets.
+//
+// WARNING: It is not safe to mutate data while iterating with this method.
+// Doing so may cause the underlying cursor to be invalidated and return
+// unexpected keys.
+//
+// Returns the following errors as required by the interface contract:
+//   - ErrTxClosed if the transaction has already been closed
+//
+// NOTE: The values returned by this function are only valid during a
+// transaction.  Attempting to access them after a transaction has ended will
+// likely result in an access violation.
+//
+// This function is part of the database.Bucket interface implementation.
+func (b *bucket) ForEachBucket(fn func(k []byte) error) error {
+	// Ensure transaction state is valid.
+	if err := b.tx.checkClosed(); err != nil {
+		return err
+	}
+
+	// Invoke the callback for each cursor item. Return the error returned
+	// from the callback when it is non-nil
+	c := newCursor(b, b.id[:], ctBuckets)
+	defer cursorFinalizer(c)
+
+	for ok := c.First(); ok; ok = c.Next() {
+		err := fn(c.Key())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (b *bucket) Cursor() database.Cursor {
 	panic("implement me")
 }
 
+// Writable returns whether or not the bucket is writable.
+//
+// This function is a part of the database.Bucket interface implementation.
 func (b *bucket) Writable() bool {
-	panic("implement me")
+	return b.tx.writable
 }
 
+// Put saves the specified key/value pair to the bucket. Keys that do not
+// already exist are added and keys that already exit are overwritten.
+//
+// Returns the following errors as required by the interface contract:
+//   - ErrKeyRequired if the key is empty
+//   - ErrIncompatibleValue if the key is the same as an existing bucket
+//   - ErrTxNotWritable if attempted against a read-only transaction
+//   - ErrTxClosed if the transaction has already been closed
+//
+// This function is part of the database.Bucket interface implementation.
 func (b *bucket) Put(key, value []byte) error {
-	panic("implement me")
+	// Ensure transaction state is valid.
+	if err := b.tx.checkClosed(); err != nil {
+		return err
+	}
+
+	// Ensure the transaction is writable
+	if !b.Writable() {
+		str := "setting a key requires a writable database transaction"
+		return makeDbErr(database.ErrTxNotWritable, str, nil)
+	}
+
+	// Ensure a key was provided.
+	if len(key) == 0 {
+		str := "put requires a key"
+		return makeDbErr(database.ErrKeyRequired, str, nil)
+	}
+
+	return b.tx.putKey(bucketizedKey(b.id, key), value)
 }
 
+// Get returns the value for the given key. Returns nil if the key dose not
+// exist in this bucket. An empty slice is returned for keys that exist but
+// have no value assigned.
+//
+// NOTE: The value returned by this function is only valid during a transaction.
+// Attempting to access it after a transaction has ended results in undefined
+// behavior.  Additionally, the value must NOT be modified by the caller.
+//
+// This function is part of the database.Bucket interface implementation.
 func (b *bucket) Get(key []byte) []byte {
-	panic("implement me")
+	// Ensure transaction state is valid.
+	if err := b.tx.checkClosed(); err != nil {
+		return nil
+	}
+
+	// Nothing to return if there is no key
+	if len(key) == 0 {
+		return nil
+	}
+	return b.tx.fetchKey(bucketizedKey(b.id, key))
 }
 
+// Delete removes the specified key from the bucket. Deleting a key that dose
+// not exist dose not return an error.
+//
+// Returns the following errors as required by the interface contract:
+//   - ErrKeyRequired if the key is empty
+//   - ErrIncompatibleValue if the key is the same as an existing bucket
+//   - ErrTxNotWritable if attempted against a read-only transaction
+//   - ErrTxClosed if the transaction has already been closed
+//
+// This function is part of the database.Bucket interface implementation.
 func (b *bucket) Delete(key []byte) error {
-	panic("implement me")
+	// Ensure transaction state is valid.
+	if err := b.tx.checkClosed(); err != nil {
+		return nil
+	}
+	// Nothing to return if there is no key
+	if len(key) == 0 {
+		return nil
+	}
+
+	// Ensure the transaction is writable
+	if !b.Writable() {
+		str := "setting a key requires a writable database transaction"
+		return makeDbErr(database.ErrTxNotWritable, str, nil)
+	}
+
+	b.tx.deleteKey(bucketizedKey(b.id, key), true)
+	return nil
 }
 
 // Enforce bucket implements the database.Bucket interface
@@ -251,6 +934,24 @@ type transaction struct {
 
 // Enforce transaction implements the database.Tx interface
 var _ database.Tx = (*transaction)(nil)
+
+// removeActiveIter removes the passed iterator from the list of active
+// iterators against the pending keys treap.
+func (tx *transaction) removeActiveIter(iter *treap.Iterator) {
+	// An indexing for loop is intentionally used over a range here as range
+	// does not reevaluate the slice on each iteration nor does it adjust
+	// the index for the modified slice.
+	tx.activeIterLock.Lock()
+	defer tx.activeIterLock.Unlock()
+
+	for i := 0; i < len(tx.activeIters); i++ {
+		if tx.activeIters[i] == iter {
+			copy(tx.activeIters[i:], tx.activeIters[i+1:])
+			tx.activeIters[len(tx.activeIters)-1] = nil
+			tx.activeIters = tx.activeIters[:len(tx.activeIters)-1]
+		}
+	}
+}
 
 // checkClosed returns an error if the database or transaction is closed.
 func (tx *transaction) checkClosed() error {
@@ -1119,6 +1820,7 @@ func (db *db) View(fn func(tx database.Tx) error) error {
 
 	tx.managed = true
 	err = fn(tx)
+	tx.managed = false
 	if err != nil {
 		// The error is ignored here because nothing was written yet
 		// and regardless of a rollback failure, the tx is closed now

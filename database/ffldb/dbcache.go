@@ -5,6 +5,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hawkit/goleveldb/leveldb/iterator"
+	"github.com/hawkit/goleveldb/leveldb/util"
+
 	"github.com/hawkit/btcd-demo/database/internal/treap"
 
 	"github.com/hawkit/goleveldb/leveldb"
@@ -19,6 +22,96 @@ const (
 	// has not been exceeded.
 	defaultFlushSecs = 300 // 5 minutes
 )
+
+// ldbCacheIter wraps a treap iterator to provide the additional functionality
+// need to satisfy the leveldb iterator.Iterator interface.
+type ldbCacheIter struct {
+	*treap.Iterator
+}
+
+// Error is only provided to satisfy the iterator interface as there are no
+// errors for this memory-only structure.
+//
+// This is part of the leveldb iterator.Iterator interface implementation.
+func (iter *ldbCacheIter) Error() error {
+	return nil
+}
+
+// SetReleaser is only provided to satisfy the iterator interface as there is no
+// need to override it.
+//
+// This is part of the leveldb iterator.Iterator interface implementation.
+func (iter *ldbCacheIter) SetReleaser(releaser util.Releaser) {
+}
+
+// Release is only provided to satisfy the iterator interface.
+//
+// This is part of the leveldb iterator.Iterator interface implementation.
+func (iter *ldbCacheIter) Release() {
+}
+
+var _ iterator.Iterator = (*ldbCacheIter)(nil)
+
+func newLdbCacheIter(snap *dbCacheSnapshot, slice *util.Range) *ldbCacheIter {
+	iter := snap.pendingKeys.Iterator(slice.Start, slice.Limit)
+	return &ldbCacheIter{Iterator: iter}
+}
+
+// dbCacheIterator defines an iterator over the key/value pairs in the
+// datagase cache and underlying database.
+type dbCacheIterator struct {
+	cacheSnapshot *dbCacheSnapshot
+	dbIter        iterator.Iterator
+	cacheIter     iterator.Iterator
+	currentIter   iterator.Iterator
+	released      bool
+}
+
+func (iter *dbCacheIterator) First() bool {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Last() bool {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Seek(key []byte) bool {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Next() bool {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Prev() bool {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Release() {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) SetReleaser(releaser util.Releaser) {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Valid() bool {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Error() error {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Key() []byte {
+	panic("implement me")
+}
+
+func (iter *dbCacheIterator) Value() []byte {
+	panic("implement me")
+}
+
+var _ iterator.Iterator = (*dbCacheIterator)(nil)
 
 // dbCacheSnapshot defines a snapshot of the database cache and underlying
 // database at a particular point in time.
@@ -64,6 +157,15 @@ func (snap *dbCacheSnapshot) Release() {
 	snap.dbSnapshot.Release()
 	snap.pendingKeys = nil
 	snap.pendingRemove = nil
+}
+
+func (snap *dbCacheSnapshot) NewIterator(slice *util.Range) *dbCacheIterator {
+	return &dbCacheIterator{
+		cacheSnapshot: snap,
+		dbIter:        snap.dbSnapshot.NewIterator(slice, nil),
+		cacheIter:     newLdbCacheIter(snap, slice),
+		released:      false,
+	}
 }
 
 // dbCache provides a database cache layer backed by an underlying database. It
